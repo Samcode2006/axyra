@@ -29,6 +29,7 @@ func (h *Handler) AnalyticsProxy() http.HandlerFunc {
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = targetURL.Host
+		req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
 	}
 	// The control plane's CORS middleware already answers for every route. The
 	// analytics service adds its own CORS headers, and a response carrying the
@@ -52,7 +53,8 @@ func (h *Handler) AnalyticsProxy() http.HandlerFunc {
 				return
 			}
 		}
-		// The console JWT is for this service only; the analytics service must not receive it.
+		// Never forward user credentials. The director supplies service credentials
+		// only after authentication and organization/tenant authorization above.
 		r.Header.Del("Authorization")
 		proxy.ServeHTTP(w, r)
 	}

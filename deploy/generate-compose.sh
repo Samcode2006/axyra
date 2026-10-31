@@ -215,6 +215,7 @@ ${agent_depends}
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform?sslmode=disable
       REDIS_URL: redis://redis:6379
       ANALYTICS_URL: http://analytics:8082
+      AXYRA_SERVICE_TOKEN: \${AXYRA_SERVICE_TOKEN:?Set AXYRA_SERVICE_TOKEN in deploy/.env}
       AXYRA_AGENT_TOKEN: \${AXYRA_AGENT_TOKEN}
       JWT_SECRET: \${JWT_SECRET}
       AXYRA_ADMIN_PASSWORD: \${AXYRA_ADMIN_PASSWORD:-}
@@ -244,9 +245,10 @@ ${agent_depends}
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform?sslmode=disable
       REDIS_URL: redis://redis:6379
       CONTROL_PLANE_URL: http://control-plane:8081
+      AXYRA_SERVICE_TOKEN: \${AXYRA_SERVICE_TOKEN:?Set AXYRA_SERVICE_TOKEN in deploy/.env}
       PORT: 8082
-    ports:
-      - "8082:8082"
+    expose:
+      - "8082"
     depends_on:
       platform-db:
         condition: service_healthy

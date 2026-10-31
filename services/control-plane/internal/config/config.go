@@ -25,6 +25,7 @@ type Config struct {
 
 	// Analytics backend service URL for reverse-proxying analytics queries from web
 	AnalyticsURL string
+	ServiceToken string
 
 	// Default agent token to seed if not already present
 	DefaultAgentToken string
@@ -48,6 +49,7 @@ func Load() (*Config, error) {
 		Port:              getEnv("PORT", "8081"),
 		JWTSecret:         getEnv("JWT_SECRET", knownDevJWTSecret),
 		AnalyticsURL:      getEnv("ANALYTICS_URL", "http://localhost:8082"),
+		ServiceToken:      os.Getenv("AXYRA_SERVICE_TOKEN"),
 		DefaultAgentToken: getEnv("AXYRA_AGENT_TOKEN", "axyra_agent_secret_token_123"),
 		TenantCount:       getPositiveIntEnv("TENANT_COUNT", 5),
 		AdminUsername:     getEnv("AXYRA_ADMIN_USERNAME", "admin"),
@@ -58,6 +60,9 @@ func Load() (*Config, error) {
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+	if len(cfg.ServiceToken) < 32 {
+		return nil, fmt.Errorf("AXYRA_SERVICE_TOKEN must be at least 32 characters")
 	}
 	if len(cfg.JWTSecret) < minJWTSecretLen {
 		return nil, fmt.Errorf("JWT_SECRET must be at least %d characters", minJWTSecretLen)

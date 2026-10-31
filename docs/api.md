@@ -4,6 +4,21 @@
 **Auth:** Every endpoint except `/health` and `POST /v1/auth/login` requires a valid `Authorization: Bearer <token>` console session JWT.  
 **Analytics endpoints** are proxied through the control plane; tenant scope is enforced server-side before forwarding.
 
+Analytics port 8082 is internal to the Compose network and is not published to
+the host. Every `/v1/analytics/*` endpoint, including rebuild and monitoring,
+requires the private `AXYRA_SERVICE_TOKEN` bearer credential. Only the control
+plane supplies it, after authenticating the console user and checking tenant
+access. Console JWTs and agent tokens do not authorize direct analytics queries.
+`/health` remains available for health checks; `/v1/agent/*` retains agent-token
+authentication.
+
+Set the same random `AXYRA_SERVICE_TOKEN` (at least 32 characters) for Analytics
+and the control plane in `deploy/.env`. Both services refuse to start without it.
+Generate one locally with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+Keep this value out of frontend environment variables and source control. After
+changing it, recreate both services. Use port 8081 and a console session for
+queries and rebuilds; do not publish port 8082 for troubleshooting.
+
 ---
 
 ## Authentication
