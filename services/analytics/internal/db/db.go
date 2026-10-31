@@ -241,7 +241,7 @@ func (db *DB) RecordQueryLatency(ctx context.Context, tenantID, endpoint string,
 func (db *DB) GetTenantMaxConcurrency(tenantID string) int {
 	var n int
 	err := db.QueryRow(`
-		SELECT COALESCE((quota->>'max_concurrent_queries')::int, 0)
+		SELECT COALESCE(max_concurrent_queries, 0)
 		FROM tenants WHERE id = $1`, tenantID).Scan(&n)
 	if err != nil || n < 0 {
 		return 0
