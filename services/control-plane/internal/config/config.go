@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // knownDevJWTSecret is the value that shipped in Phase 1. It is public, so a
@@ -27,6 +28,7 @@ type Config struct {
 
 	// Default agent token to seed if not already present
 	DefaultAgentToken string
+	TenantCount       int
 
 	// Seeded console users. A user is only created when its password is set,
 	// or (for the demo admin/operator) generated and logged once at first start.
@@ -47,6 +49,7 @@ func Load() (*Config, error) {
 		JWTSecret:         getEnv("JWT_SECRET", knownDevJWTSecret),
 		AnalyticsURL:      getEnv("ANALYTICS_URL", "http://localhost:8082"),
 		DefaultAgentToken: getEnv("AXYRA_AGENT_TOKEN", "axyra_agent_secret_token_123"),
+		TenantCount:       getPositiveIntEnv("TENANT_COUNT", 5),
 		AdminUsername:     getEnv("AXYRA_ADMIN_USERNAME", "admin"),
 		AdminPassword:     getEnv("AXYRA_ADMIN_PASSWORD", ""),
 		OperatorUsername:  getEnv("AXYRA_OPERATOR_USERNAME", "operator"),
@@ -72,4 +75,12 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getPositiveIntEnv(key string, fallback int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v < 1 {
+		return fallback
+	}
+	return v
 }

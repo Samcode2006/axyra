@@ -159,9 +159,10 @@ func (h *Handler) AgentAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// confirmed_lsn from agent_cursors is the restart-safe cursor position.
-	// The agent should resume WAL replication from this LSN after a restart.
-	confirmedLSN, _ := h.db.GetAgentCursor(agentID)
+	// Each silo has an independent WAL timeline, so its cursor must be keyed by
+	// the source named by the agent. Sharing one cursor would skip other silos.
+	source := r.URL.Query().Get("source")
+	confirmedLSN, _ := h.db.GetAgentCursor(agentID, source)
 
 	var lastProcessedAt time.Time
 	_ = h.db.QueryRowContext(r.Context(), `
@@ -175,6 +176,7 @@ func (h *Handler) AgentAck(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id":          agentID,
+		"source":            source,
 		"confirmed_lsn":     confirmedLSN,
 		"last_processed_at": lastProcessedAt,
 	})

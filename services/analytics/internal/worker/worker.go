@@ -203,7 +203,7 @@ func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) erro
 	// This is done outside the transaction: if it fails, the worst case is
 	// the agent re-delivers already-processed events, which idempotency handles.
 	if e.LSN != "" {
-		if curErr := w.db.UpsertAgentCursor(ctx, e.AgentID, e.LSN); curErr != nil {
+		if curErr := w.db.UpsertAgentCursor(ctx, e.AgentID, e.ExternalTenantID, e.LSN); curErr != nil {
 			log.Printf("[analytics-worker] warning: failed to advance agent cursor for %s to %s: %v", e.AgentID, e.LSN, curErr)
 		}
 	}
