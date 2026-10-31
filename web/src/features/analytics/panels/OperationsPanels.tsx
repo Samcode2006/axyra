@@ -104,7 +104,7 @@ export function PaymentsPanel({ scope }: { scope: PanelScope }) {
 
 const STAGE_COLOR: Record<string, string> = {
   pending: 'var(--text-muted)',
-  processing: 'var(--blue, #3b82f6)',
+  processing: 'var(--blue)',
   shipped: 'var(--accent)',
   delivered: 'var(--green)',
   returned: 'var(--red)',

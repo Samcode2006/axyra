@@ -75,7 +75,7 @@ export function CohortPanel({ scope }: { scope: PanelScope }) {
                 >
                   <div className="stack-bar" style={{ height: `${h}%` }}>
                     <div style={{ height: `${100 - newShare}%`, background: 'var(--accent)' }} />
-                    <div style={{ height: `${newShare}%`, background: 'var(--blue, #3b82f6)' }} />
+                    <div style={{ height: `${newShare}%`, background: 'var(--blue)' }} />
                   </div>
                   <span className="trend-label">{pt.bucket.slice(5)}</span>
                 </div>
@@ -83,7 +83,7 @@ export function CohortPanel({ scope }: { scope: PanelScope }) {
             })}
           </div>
           <p className="hint">
-            <span className="legend-dot" style={{ background: 'var(--blue, #3b82f6)' }} /> new customers&nbsp;&nbsp;
+            <span className="legend-dot" style={{ background: 'var(--blue)' }} /> new customers&nbsp;&nbsp;
             <span className="legend-dot" style={{ background: 'var(--accent)' }} /> returning customers
           </p>
         </>

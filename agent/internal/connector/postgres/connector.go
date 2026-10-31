@@ -208,6 +208,13 @@ func (c *PostgresConnector) runReplication(ctx context.Context, out chan<- conne
 		}
 
 		switch msg := backendMsg.(type) {
+		case *pgproto3.ErrorResponse:
+			// A logical decoding error ends the replication stream without
+			// necessarily closing the connection. Reconnect instead of waiting
+			// indefinitely on an inactive replication slot.
+			return fmt.Errorf("replication stream: %s (SQLSTATE %s)", msg.Message, msg.Code)
+		case *pgproto3.CopyDone, *pgproto3.ReadyForQuery:
+			return fmt.Errorf("replication stream ended unexpectedly")
 		case *pgproto3.CopyData:
 			if len(msg.Data) == 0 {
 				continue
