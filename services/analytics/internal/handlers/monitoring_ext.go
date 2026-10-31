@@ -190,13 +190,7 @@ func (h *Handler) MonitoringDetail(w http.ResponseWriter, r *http.Request) {
 		            ELSE g.status END
 		FROM agents g
 		JOIN applications a ON a.id = g.application_id
-		LEFT JOIN LATERAL (
-			SELECT confirmed_lsn
-			FROM agent_cursors
-			WHERE agent_id = g.id
-			ORDER BY updated_at DESC
-			LIMIT 1
-		) c ON TRUE
+		LEFT JOIN agent_cursors c ON c.agent_id = g.id
 		LEFT JOIN processing_watermarks w ON w.agent_id = g.id
 		WHERE ($1::text IS NULL OR a.organization_id = (SELECT organization_id FROM tenants WHERE id = $1))
 		ORDER BY g.created_at, g.id LIMIT 200`, tenantArg)

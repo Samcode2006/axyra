@@ -80,7 +80,6 @@ CREATE TABLE IF NOT EXISTS processing_watermarks (
 -- The agent polls GET /v1/agent/ack and resumes replication from this LSN.
 CREATE TABLE IF NOT EXISTS agent_cursors (
     agent_id VARCHAR(64) PRIMARY KEY,
-    source VARCHAR(128) NOT NULL DEFAULT 'default',
     confirmed_lsn VARCHAR(64) NOT NULL DEFAULT '0/0',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

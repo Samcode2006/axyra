@@ -132,7 +132,6 @@ func applyMigration(db *sql.DB, name string) error {
 // SeedOptions carries the credentials used when seeding a fresh platform.
 type SeedOptions struct {
 	AgentToken       string
-	TenantCount      int
 	AdminUsername    string
 	AdminPassword    string
 	OperatorUsername string
@@ -143,7 +142,7 @@ type SeedOptions struct {
 // built-in metric definitions. Every step is skipped when its data already
 // exists, so it is safe to call on each start and on upgraded Phase 1 databases.
 func SeedDefaultData(db *sql.DB, opts SeedOptions) error {
-	if err := seedDemoTenancy(db, opts.AgentToken, opts.TenantCount); err != nil {
+	if err := seedDemoTenancy(db, opts.AgentToken); err != nil {
 		return err
 	}
 	if err := seedUsers(db, opts); err != nil {
@@ -152,11 +151,8 @@ func SeedDefaultData(db *sql.DB, opts SeedOptions) error {
 	return seedBuiltinMetrics(db)
 }
 
-func seedDemoTenancy(db *sql.DB, agentToken string, tenantCount int) error {
+func seedDemoTenancy(db *sql.DB, agentToken string) error {
 	log.Println("[control-plane-db] seeding default demo data...")
-	if tenantCount < 5 {
-		tenantCount = 5
-	}
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -201,22 +197,6 @@ func seedDemoTenancy(db *sql.DB, agentToken string, tenantCount int) error {
 	for _, s := range stmts {
 		if _, err := tx.Exec(s.sql, s.args...); err != nil {
 			return fmt.Errorf("seed %s: %w", s.name, err)
-		}
-	}
-	for i := 6; i <= tenantCount; i++ {
-		ext := fmt.Sprintf("store_%03d", i)
-		tenantID := fmt.Sprintf("tenant_%03d", i)
-		if _, err := tx.Exec(`
-			INSERT INTO tenants (id, organization_id, external_tenant_id, name, status, max_events_per_day, max_concurrent_queries, created_at)
-			VALUES ($1, 'org_demo', $2, $3, 'active', 1000000, 10, NOW()) ON CONFLICT (id) DO NOTHING`,
-			tenantID, ext, fmt.Sprintf("Store %d", i)); err != nil {
-			return fmt.Errorf("seed tenant %s: %w", ext, err)
-		}
-		if _, err := tx.Exec(`
-			INSERT INTO tenant_mappings (id, agent_id, external_tenant_id, tenant_id, created_at)
-			VALUES ($1, 'agent_ref_demo', $2, $3, NOW()) ON CONFLICT (id) DO NOTHING`,
-			fmt.Sprintf("map_%03d", i), ext, tenantID); err != nil {
-			return fmt.Errorf("seed tenant mapping %s: %w", ext, err)
 		}
 	}
 

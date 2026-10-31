@@ -73,13 +73,9 @@ func (m *Mapper) Map(ce connector.ChangeEvent) (*AxyraEvent, error) {
 		}
 	}
 
-	// Extract external tenant ID.
-	// OverrideTenantID (set by the multi-source runner) always wins — it means
-	// the entire database belongs to one tenant (silo model).
+	// Extract external tenant ID
 	extTenantID := ""
-	if ce.OverrideTenantID != "" {
-		extTenantID = ce.OverrideTenantID
-	} else if v, ok := ce.Row[tenantCol]; ok && v != nil {
+	if v, ok := ce.Row[tenantCol]; ok && v != nil {
 		extTenantID = fmt.Sprintf("%v", v)
 	}
 	if extTenantID == "" {
