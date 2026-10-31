@@ -18,6 +18,7 @@ func (h *Handler) Routes() http.Handler {
 
 	r.Get("/health", h.Health)
 	r.Post("/v1/auth/login", h.Login)
+	r.With(middleware.ServiceAuth(h.cfg.ServiceToken)).Get("/internal/metric-definitions/{metric_id}", h.GetMetricForTenant)
 
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Authenticate(h.jwtSecret))

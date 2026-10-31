@@ -14,6 +14,32 @@ import (
 
 const metricCols = `id, organization_id, name, description, config, enabled, organization_id IS NULL, created_at, updated_at`
 
+// GetMetricForTenant is service-only. Derive ownership from the authorized
+// tenant, never from a caller-provided organization ID. Console routes retain
+// their existing JWT checks and are not accessible with the service credential.
+func (h *Handler) GetMetricForTenant(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.URL.Query().Get("tenant_id")
+	if tenantID == "" {
+		respondError(w, http.StatusBadRequest, "tenant_id is required")
+		return
+	}
+	m, err := scanMetric(h.db.QueryRowContext(r.Context(), `
+		SELECT `+metricCols+` FROM metric_definitions
+		WHERE id = $1 AND EXISTS (
+			SELECT 1 FROM tenants t WHERE t.id = $2
+			AND (metric_definitions.organization_id IS NULL OR metric_definitions.organization_id = t.organization_id))
+		ORDER BY (organization_id IS NULL) ASC LIMIT 1`, chi.URLParam(r, "metric_id"), tenantID))
+	if errors.Is(err, sql.ErrNoRows) {
+		notFound(w, "Metric definition")
+		return
+	}
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, m)
+}
+
 func scanMetric(row interface{ Scan(...any) error }) (models.MetricDefinition, error) {
 	var m models.MetricDefinition
 	var cfg []byte

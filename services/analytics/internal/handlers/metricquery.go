@@ -3,13 +3,16 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/lib/pq"
 )
 
@@ -44,7 +47,7 @@ type metricDefinitionResp struct {
 // Arbitrary SQL is never accepted.
 func (h *Handler) QueryMetric(w http.ResponseWriter, r *http.Request) {
 	// Extract metric_id from URL: path is /v1/analytics/metrics/{metric_id}
-	metricID := r.PathValue("metric_id")
+	metricID := chi.URLParam(r, "metric_id")
 	if metricID == "" {
 		respondError(w, http.StatusBadRequest, "metric_id is required")
 		return
@@ -74,9 +77,13 @@ func (h *Handler) QueryMetric(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch metric definition from control plane
-	def, err := h.fetchMetricDef(r.Context(), metricID)
+	def, err := h.fetchMetricDef(r.Context(), metricID, tenantID)
 	if err != nil {
-		respondError(w, http.StatusNotFound, fmt.Sprintf("metric definition not found: %v", err))
+		if errors.Is(err, errMetricNotFound) {
+			respondError(w, http.StatusNotFound, "Metric definition not found")
+		} else {
+			respondError(w, http.StatusBadGateway, "Could not load metric definition")
+		}
 		return
 	}
 	if !def.Enabled {
@@ -101,21 +108,25 @@ func (h *Handler) QueryMetric(w http.ResponseWriter, r *http.Request) {
 }
 
 // fetchMetricDef retrieves the metric definition from the control plane.
-func (h *Handler) fetchMetricDef(ctx context.Context, metricID string) (*metricDefinitionResp, error) {
-	url := fmt.Sprintf("%s/v1/metric-definitions/%s", h.cfg.ControlPlaneURL, metricID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+var errMetricNotFound = errors.New("metric definition not found")
+
+func (h *Handler) fetchMetricDef(ctx context.Context, metricID, tenantID string) (*metricDefinitionResp, error) {
+	endpoint := fmt.Sprintf("%s/internal/metric-definitions/%s?%s", strings.TrimRight(h.cfg.ControlPlaneURL, "/"), url.PathEscape(metricID), url.Values{"tenant_id": {tenantID}}.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("control plane unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("not found")
+		return nil, errMetricNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("control plane returned %d", resp.StatusCode)

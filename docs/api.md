@@ -19,6 +19,15 @@ Keep this value out of frontend environment variables and source control. After
 changing it, recreate both services. Use port 8081 and a console session for
 queries and rebuilds; do not publish port 8082 for troubleshooting.
 
+For configured metric execution, Analytics uses the same private service
+credential to fetch `GET /internal/metric-definitions/{metric_id}?tenant_id=...`
+from the control plane. This service-only endpoint derives organization scope
+from the tenant; an `organization_id` supplied by a caller cannot override it.
+It returns that organization's definition or a built-in definition. The public
+`/v1/metric-definitions` management routes still require a console JWT.
+Metric execution returns 404 for an unavailable definition, 410 when disabled,
+and 502 if the definition service cannot be reached or authenticated.
+
 ---
 
 ## Authentication
