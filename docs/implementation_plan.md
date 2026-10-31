@@ -377,12 +377,12 @@ Do not run every dashboard query against the raw event ledger. The query API sho
 
 **Goal:** create an order in the reference client, ingest it into Axyra, process it, query an aggregate and prove tenant isolation.
 
-| Time | Developer A — Control plane + reference integration | Developer B — Analytics data plane |
+| Time | Developer A — Go Lead (all Go services) | Developer B — Everything else |
 |---|---|---|
-| 0–15 min | Agree contracts, repo and Compose skeleton together | Agree contracts, repo and Compose skeleton together |
-| 15–75 min | Go control-plane skeleton; metadata schema; seed app and two tenants; API-key auth and external-to-internal tenant mapping | Go analytics skeleton; analytics schema; `POST /v1/events`; Redis queue; worker; idempotent `order.created`; summary query |
-| 75–100 min | FastAPI publishes order event; React reference client creates order and displays response | Connect ingestion → Redis → worker → PostgreSQL; return summary and `last_processed_at` |
-| 100–120 min | Integrate and rehearse the client flow | Test aggregate correctness and tenant isolation; fix integration issues |
+| 0–15 min | Agree contracts, API schemas and repo skeleton together | ← same |
+| 15–75 min | Go control-plane skeleton; metadata schema; seed org, app and two tenants; API-key auth; external-to-internal tenant mapping. **Then:** Go analytics skeleton; analytics schema; `POST /v1/events`; Redis queue; worker; idempotent `order.created`; summary query | Scaffold `web/` Vite app + routing shell; FastAPI reference backend scaffold; Docker Compose wiring + health-checks |
+| 75–100 min | Connect ingestion → Redis → worker → PostgreSQL; expose `GET /v1/analytics/orders/summary` and `last_processed_at` | Wire React reference client to FastAPI (create-order form); FastAPI publishes event to Axyra; verify all services start cleanly |
+| 100–120 min | Integration fixes; tenant isolation smoke-test | Display summary response in `web/` Overview page; rehearse full demo flow |
 
 **Checkpoint demo:**
 1. Start everything with Docker Compose.
@@ -483,30 +483,69 @@ README should include prerequisites, environment variables, Compose startup/rese
 
 ## 13. Two-developer ownership
 
-### Developer A — Control plane, reference client and platform integration
-- Go control-plane service and metadata migrations.
-- Organization/application/tenant registry and mappings.
-- API keys, policies and metric configuration.
-- FastAPI reference-client event publisher.
-- React reference frontend.
-- Integration/auth contract between reference client and Axyra.
-- Relevant sections of the one `web` React app: tenants, applications and configuration.
+> **Principle:** Developer A (Go Lead) owns **all Go code** and the complex cross-cutting platform concerns. Developer B owns everything else — React web app, FastAPI reference client, Docker Compose, and documentation.
 
-### Developer B — Analytics engine and performance
-- Go ingestion and query APIs.
-- Redis queue and worker lifecycle.
-- Analytics PostgreSQL schema and migrations.
+### Developer A — Go Lead (all Go + complex platform work)
+
+**Go services (exclusive owner)**
+- Go control-plane service (`services/control-plane/`) and metadata migrations.
+- Organization/application/tenant registry and external-to-internal tenant mappings.
+- API key generation, rotation, revocation and validation.
+- Policies, quotas and metric configuration endpoints.
+- Audit records for administrative changes.
+- Go analytics data plane (`services/analytics/`) and analytics migrations.
+- Ingestion API, payload validation, application auth and trusted tenant resolution.
+- Redis queue, worker lifecycle, deduplication and retry/dead-letter handling.
 - Idempotent event processing and update/cancel correctness.
-- Aggregate tables and all PRD analytics endpoints.
-- Rebuild/reconciliation, query limits and benchmarks.
-- Relevant sections of the one `web` React app: analytics and monitoring.
+- Precomputed aggregate tables (hourly/daily roll-ups).
+- All PRD analytics query endpoints (FR-1 through FR-7).
+- Rebuild/reconciliation (B-2), per-tenant query concurrency limits (B-3).
+- Benchmark scripts and performance tuning (`scripts/benchmark/`, `scripts/load-test/`).
+
+**Cross-cutting platform responsibilities**
+- Define and freeze the API contract (`docs/api.md`, `docs/event-schema.md`) before parallel coding.
+- Design the tenant-scope security model and review all authentication paths.
+- Provide typed response schemas for the React API client (`web/src/types/`).
+- Review all pull requests that touch auth, tenant isolation or the event pipeline.
+- Config-driven metric definitions in `configs/metrics/` (B-4).
+
+**`web/` React pages owned by Developer A**
+- Monitoring page (B-5): ingestion rate, queue depth, worker health, failed events, query latency.
+- Metric Configuration page.
+- Platform Operations (operator-only) page.
+
+### Developer B — Everything else
+
+**`web/` React platform app**
+- Scaffold and maintain the `web/` Vite + React project (routing shell, design system, shared components).
+- Overview page: high-level tenant status, usage indicators.
+- Tenant Management page: list/register tenants, quotas.
+- Applications & Integrations page: credentials display.
+- Analytics pages: summary, trend charts, Top-N, breakdown, data-freshness indicator (B-1).
+- Access & Policies page.
+- Shared `web/src/lib/api.ts` API client and route guards.
+- UI unit tests and accessibility audit.
+
+**Reference client**
+- FastAPI reference backend (`reference-client/backend/`): Dockerfile, DB migrations, order APIs.
+- `POST /v1/events` publisher to Axyra using a server-side credential.
+- Retry logic and OpenAPI spec / Swagger UI for the reference backend.
+- React reference frontend (`reference-client/frontend/`): create/view demo orders.
+- Seed demo data for analytics DB (`scripts/seed/`).
+- End-to-end test harness for the full event flow.
+
+**Infrastructure and DevOps**
+- Docker Compose (`deploy/docker-compose.yaml`): networking, volumes, health-checks, env examples.
+- CI pipeline: lint (Go + TypeScript), test, and build steps.
+- Deployment scripts and release tagging (`v1.0.0`).
+- Troubleshooting and README sections for Compose startup, reset and migrations.
 
 ### Shared ownership
-- Event/API contract before parallel coding.
-- One shared design system and routing structure in `web/`.
-- Authentication and tenant-scope review.
-- End-to-end integration and isolation tests.
-- Docker Compose, demo rehearsal and README.
+- Event/API contract agreed before any parallel coding begins.
+- One shared design system and routing structure in `web/` (Developer B leads, Developer A contributes types).
+- End-to-end integration and tenant-isolation tests.
+- Docker Compose demo rehearsal.
+- Project README (`docs/` and root `README.md`).
 
 Do not create separate React apps for individual pages. Developers can work in separate feature folders/branches, but all Axyra platform pages ship from the single `web/` application.
 
