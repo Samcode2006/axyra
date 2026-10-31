@@ -1,0 +1,31 @@
+# Axyra Agent Configuration Example
+# Connects to PostgreSQL, reads WAL changes via logical replication,
+# and streams structured events over TLS to the Axyra data plane.
+
+axyra_endpoint: "${AXYRA_ENDPOINT}"
+agent_token: "${AXYRA_AGENT_TOKEN}"
+agent_id: "agent_ref_demo"
+postgres_dsn: "${POSTGRES_DSN}"
+replication_slot: "${REPLICATION_SLOT}"
+publication_name: "axyra_pub"
+
+batch_size: 10
+flush_interval: 200ms
+health_port: "8083"
+
+tables:
+  - name: orders
+    tenant_id_column: store_id
+    pk_column: id
+    event_type_column: status
+    columns:
+      - id
+      - store_id
+      - amount
+      - currency
+      - status
+      - product_id
+      - product_name
+      - category
+      - created_at
+      - updated_at

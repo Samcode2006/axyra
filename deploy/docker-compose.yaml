@@ -45,7 +45,10 @@ services:
   # ─── Axyra Agent (runs alongside reference-db, reads WAL) ────────────────────
 
   axyra-agent:
-    image: axyra-agent:latest   # built from agent/Dockerfile by Developer A
+    build:
+      context: ../agent
+      dockerfile: Dockerfile
+    image: axyra-agent:latest
     restart: unless-stopped
     environment:
       POSTGRES_DSN: postgres://postgres:postgres@reference-db:5432/reference_db
@@ -91,11 +94,16 @@ services:
       retries: 10
 
   control-plane:
-    image: axyra-control-plane:latest   # built from services/control-plane/ by Developer A
+    build:
+      context: ../services/control-plane
+      dockerfile: Dockerfile
+    image: axyra-control-plane:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform
       REDIS_URL: redis://redis:6379
+      ANALYTICS_URL: http://analytics:8082
+      AXYRA_AGENT_TOKEN: ${AXYRA_AGENT_TOKEN}
       JWT_SECRET: ${JWT_SECRET}
       PORT: 8081
     ports:
@@ -112,7 +120,10 @@ services:
       retries: 5
 
   analytics:
-    image: axyra-analytics:latest   # built from services/analytics/ by Developer A
+    build:
+      context: ../services/analytics
+      dockerfile: Dockerfile
+    image: axyra-analytics:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform
