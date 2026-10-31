@@ -219,3 +219,36 @@ html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
 .login-card label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-muted); }
 .login-card input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 10px 14px; font-size: 14px; outline: none; }
 .login-card input:focus { border-color: var(--accent); }
+
+/* ─── Phase 2 additions ───────────────────────────────────────────────────── */
+.form textarea {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 10px 14px; font-size: 13px; outline: none; font-family: inherit; resize: vertical;
+}
+.form textarea:focus { border-color: var(--accent); }
+.form .hint, .hint { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.stack { display: flex; flex-direction: column; gap: 16px; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.panel-head .panel-title { margin-bottom: 0; }
+.banner { border-radius: var(--radius); padding: 14px 16px; font-size: 13px; border: 1px solid var(--border); }
+.banner p { margin: 6px 0 10px; color: var(--text-muted); }
+.banner--secret { border-color: var(--amber); background: rgba(245,158,11,0.08); }
+.banner--ok { border-color: var(--green); background: rgba(34,197,94,0.08); }
+.secret-value {
+  display: block; word-break: break-all; padding: 10px; margin-bottom: 10px; border-radius: 6px;
+  background: var(--bg); color: var(--amber); font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; user-select: all;
+}
+.sidebar-user { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.sidebar-user-name { font-size: 13px; font-weight: 600; }
+.sidebar-user-role { font-size: 11px; color: var(--text-muted); word-break: break-all; margin-bottom: 4px; }
+.subpanel { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.subpanel h3 { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+.inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.inline-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.inline-form input, .inline-form select {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none;
+}
+.inline-form input:focus, .inline-form select:focus { border-color: var(--accent); }
+.badge--blue { background: rgba(108,99,255,0.15); color: var(--accent-light); }
+.json-cell { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

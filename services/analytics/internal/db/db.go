@@ -1,8 +1,10 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
@@ -68,15 +70,20 @@ func (db *DB) Migrate() error {
 	return nil
 }
 
-// ValidateAgentToken verifies if the agent token exists and is not revoked.
+// ValidateAgentToken verifies that the agent token exists, is not revoked and
+// has not expired. Tokens are stored as SHA-256 hashes by the control plane
+// (see auth.HashAgentToken there), so the lookup hashes the presented value.
 // Returns agent_id.
 func (db *DB) ValidateAgentToken(token string) (string, error) {
+	sum := sha256.Sum256([]byte(token))
 	var agentID string
 	err := db.QueryRow(`
-		SELECT agent_id 
-		FROM agent_tokens 
-		WHERE token = $1 AND revoked_at IS NULL
-	`, token).Scan(&agentID)
+		SELECT agent_id
+		FROM agent_tokens
+		WHERE token_hash = $1
+		  AND revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > NOW())
+	`, hex.EncodeToString(sum[:])).Scan(&agentID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "", fmt.Errorf("invalid or revoked agent token")

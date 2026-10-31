@@ -46,6 +46,37 @@ export interface Agent {
   created_at: string;
 }
 
+export type TokenStatus = 'active' | 'expired' | 'revoked';
+
+/** Credential metadata. The secret is only ever returned once, at issue/rotate time. */
+export interface AgentToken {
+  id: string;
+  agent_id: string;
+  name?: string;
+  token_prefix: string;
+  status: TokenStatus;
+  created_at: string;
+  expires_at?: string;
+  revoked_at?: string;
+}
+
+export interface IssuedToken {
+  token_id: string;
+  token: string;
+  token_prefix: string;
+  expires_at?: string;
+  previous_token_id?: string;
+  previous_token_expires_at?: string;
+}
+
+export interface TenantMapping {
+  id: string;
+  agent_id: string;
+  external_tenant_id: string;
+  tenant_id: string;
+  created_at: string;
+}
+
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
 export interface OrderSummary {
@@ -107,11 +138,13 @@ export interface AnalyticsStatus {
 
 // ─── Access & Policies ───────────────────────────────────────────────────────
 
+export type PolicyType = 'rate_limit' | 'query_limit' | 'data_access';
+
 export interface Policy {
   id: string;
   tenant_id: string;
   name: string;
-  type: 'rate_limit' | 'query_limit' | 'data_access';
+  type: PolicyType;
   config: Record<string, unknown>;
   created_at: string;
 }
@@ -131,3 +164,67 @@ export interface PaginatedResponse<T> {
   per_page: number;
 }
 
+
+// ─── Users & roles ───────────────────────────────────────────────────────────
+
+export type Role = 'admin' | 'operator';
+
+export interface User {
+  id: string;
+  username: string;
+  role: Role;
+  /** Absent for platform operators. */
+  organization_id?: string;
+}
+
+// ─── Metric configuration ────────────────────────────────────────────────────
+
+export type Aggregation = 'count' | 'sum' | 'avg' | 'min' | 'max' | 'count_distinct';
+
+export interface MetricFilter {
+  field: string;
+  op: 'eq' | 'neq' | 'in';
+  value: string | string[];
+}
+
+export interface MetricConfig {
+  source: 'orders';
+  aggregation: Aggregation;
+  field?: string;
+  group_by?: string[];
+  filters?: MetricFilter[];
+  granularity?: Array<'hour' | 'day'>;
+}
+
+export interface MetricDefinition {
+  id: string;
+  /** null for built-in definitions. */
+  organization_id: string | null;
+  name: string;
+  description?: string;
+  config: MetricConfig;
+  enabled: boolean;
+  builtin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Audit ───────────────────────────────────────────────────────────────────
+
+export interface AuditLog {
+  id: number;
+  organization_id?: string;
+  actor_id: string;
+  actor_name: string;
+  actor_role: Role;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AuditLogPage {
+  data: AuditLog[];
+  next_before_id?: number;
+}

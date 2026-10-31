@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { StatCard } from '../../components/StatCard';
 import { Badge } from '../../components/Badge';
 import { Spinner, ErrorMsg } from '../../components/Feedback';
-import { analytics, tenants, agents } from '../../lib/api';
+import { analytics, tenants, agents, errMsg } from '../../lib/api';
 import { formatCurrency, formatNumber, relativeTime } from '../../lib/utils';
 import type { OrderSummary, AnalyticsStatus, Tenant, Agent } from '../../types';
 
@@ -17,20 +17,18 @@ export default function OverviewPage() {
   useEffect(() => {
     const to = new Date().toISOString();
     const from = new Date(Date.now() - 7 * 86_400_000).toISOString();
-    Promise.all([
-      analytics.summary({ from, to }),
-      analytics.status(),
-      tenants.list(),
-      agents.list(),
-    ])
-      .then(([s, st, t, a]) => {
-        setSummary(s.data);
-        setStatus(st.data);
+    // Management data and analytics are independent: an organization with no
+    // tenants yet (or an analytics outage) must not hide the management data.
+    Promise.all([tenants.list(), agents.list()])
+      .then(([t, a]) => {
         setTenantList(t.data.data ?? []);
         setAgentList(a.data);
       })
-      .catch(() => setError('Could not load overview data. Are the services running?'))
+      .catch((err) => setError(errMsg(err, 'Could not load overview data. Are the services running?')))
       .finally(() => setLoading(false));
+
+    analytics.summary({ from, to }).then((s) => setSummary(s.data)).catch(() => setSummary(null));
+    analytics.status().then((s) => setStatus(s.data)).catch(() => setStatus(null));
   }, []);
 
   if (loading) return <Spinner />;

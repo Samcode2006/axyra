@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { auth } from '../../lib/api';
+import { auth, errMsg } from '../../lib/api';
 
 export default function LoginPage() {
   const nav = useNavigate();
@@ -15,11 +15,10 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await auth.login(form.username, form.password);
-      sessionStorage.setItem('axyra_token', res.data.token);
+      await auth.login(form.username, form.password);
       nav(from, { replace: true });
-    } catch {
-      setError('Invalid credentials. Check the Axyra service is running.');
+    } catch (err) {
+      setError(errMsg(err, 'Sign-in failed'));
     } finally {
       setLoading(false);
     }
@@ -37,6 +36,7 @@ export default function LoginPage() {
             <input
               required
               autoFocus
+              autoComplete="username"
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
               placeholder="admin"
@@ -46,6 +46,7 @@ export default function LoginPage() {
             <input
               required
               type="password"
+              autoComplete="current-password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               placeholder="••••••••"

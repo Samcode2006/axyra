@@ -42,6 +42,21 @@ services:
       timeout: 5s
       retries: 5
 
+  reference-frontend:
+    build:
+      context: ../reference-client/frontend
+      dockerfile: Dockerfile
+      args:
+        # Inlined at build time. These are URLs the *browser* uses, hence localhost.
+        VITE_API_URL: http://localhost:8000/api/v1
+        VITE_AXYRA_URL: http://localhost:5173
+    restart: unless-stopped
+    ports:
+      - "5174:80"
+    depends_on:
+      reference-backend:
+        condition: service_healthy
+
   # ─── Axyra Agent (runs alongside reference-db, reads WAL) ────────────────────
 
   axyra-agent:
@@ -103,6 +118,9 @@ services:
       ANALYTICS_URL: http://analytics:8082
       AXYRA_AGENT_TOKEN: ${AXYRA_AGENT_TOKEN}
       JWT_SECRET: ${JWT_SECRET}
+      # Console logins. If a password is empty, one is generated and printed once in the logs.
+      AXYRA_ADMIN_PASSWORD: ${AXYRA_ADMIN_PASSWORD:-}
+      AXYRA_OPERATOR_PASSWORD: ${AXYRA_OPERATOR_PASSWORD:-}
       PORT: 8081
     ports:
       - "8081:8081"
@@ -150,9 +168,10 @@ services:
     build:
       context: ../web
       dockerfile: Dockerfile
+      args:
+        # Vite inlines this at build time, so it must be a build argument, not a runtime env var.
+        VITE_API_URL: http://localhost:8081
     restart: unless-stopped
-    environment:
-      VITE_API_URL: http://localhost:8081
     ports:
       - "5173:80"
     depends_on:
