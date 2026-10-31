@@ -159,8 +159,11 @@ AXYRA PLATFORM
 ├── agent/                          # Go: Axyra Agent binary (ships to customers)
 │   ├── cmd/agent/                  # Entry point and CLI flags
 │   ├── internal/
-│   │   ├── replication/            # PostgreSQL WAL / logical replication reader
-│   │   ├── mapper/                 # Row-change → Axyra event transformer
+│   │   ├── connector/              # source.Connector interface + implementations
+│   │   │   ├── interface.go        # source.Connector interface (ChangeEvent stream)
+│   │   │   ├── postgres/           # PostgreSQL WAL / logical replication (Phase 1)
+│   │   │   └── webhook/            # HTTP push fallback for any database (Phase 1)
+│   │   ├── mapper/                 # ChangeEvent → Axyra event transformer
 │   │   ├── sender/                 # TLS event stream to Axyra data plane
 │   │   └── config/                 # Table watch-list, column mappings, tenant-id field
 │   └── Dockerfile
@@ -216,17 +219,40 @@ There are only two frontend projects: `reference-client/frontend` and `web`. The
 
 ### 7.1 Axyra Agent (Go binary — runs in customer infra)
 
-The agent is the **only component that touches the customer's database**. It:
-- Connects to the customer's PostgreSQL using the logical replication protocol.
-- Consumes the WAL stream for configured tables (e.g. `orders`, `products`).
-- Translates row-level INSERT / UPDATE / DELETE changes into structured Axyra events using a declarative column mapping in `configs/agent-example.yaml`.
-- Extracts the external tenant ID from a configured column (e.g. `store_id`).
-- Authenticates to the Axyra data plane using a pre-registered agent credential.
+The agent is the **only component that touches the customer's database**. It is built around a `source.Connector` interface so that different database backends can be supported without rewriting the core pipeline.
+
+```
+           source.Connector interface
+    ┌──────────────┬──────────────────────┐
+    ▼              ▼                      ▼
+PostgreSQL    HTTP Webhook           MySQL binlog
+WAL reader    (any database,      (future connector)
+(Phase 1)      push-based,
+               Phase 1 fallback)
+```
+
+**Core pipeline (database-agnostic):**
+- Receives `ChangeEvent` structs from whichever connector is active.
+- Extracts the external tenant ID from a configured field.
+- Authenticates to the Axyra data plane using a pre-registered agent token.
+- Transforms change events into the Axyra event envelope.
 - Streams events over TLS to the Axyra ingestion endpoint.
-- Tracks replication slot position so events survive agent restarts without gaps or duplicates.
+- Tracks cursor position (WAL LSN, binlog offset, or webhook sequence) so events survive agent restarts without gaps or duplicates.
 - Exposes a local health/status endpoint for monitoring.
 
-The agent does **not** require any changes to customer application code.
+**PostgreSQL WAL connector (Phase 1 — primary):**
+- Connects using the PostgreSQL logical replication protocol.
+- Consumes the WAL stream for configured tables (e.g. `orders`, `products`).
+- Translates row-level INSERT / UPDATE / DELETE changes into `ChangeEvent` structs.
+- Idempotency is guaranteed naturally by LSN-derived event IDs.
+
+**HTTP webhook / push fallback (Phase 1 — for non-PostgreSQL databases):**
+- Exposes a local HTTP endpoint that any application or database trigger can POST to.
+- Accepts a simple JSON payload describing the change (table, operation, row data, tenant field).
+- Useful for MySQL, MongoDB, MS SQL Server or any database without a native CDC connector.
+- The application or a database trigger sends the POST — one-line integration, no WAL setup needed.
+
+The agent does **not** require changes to customer application code when using the PostgreSQL connector. The webhook fallback requires a single outbound HTTP call or a DB trigger.
 
 ### 7.2 Go control plane
 
@@ -400,6 +426,16 @@ GET  /v1/analytics/status               # Freshness, lag, last processed LSN
 ```
 
 The query API derives tenant scope from the authenticated user's session context; it does not accept an untrusted tenant ID as an authorization mechanism. The agent endpoint uses a separate agent token; the two auth paths are distinct.
+
+**Ingestion path summary:**
+
+| Customer database | Recommended path | Notes |
+|---|---|---|
+| PostgreSQL | Agent WAL connector | Zero app-code changes; LSN idempotency |
+| MySQL / MariaDB | Agent webhook fallback or DB trigger | One HTTP call per change |
+| MongoDB | Agent webhook fallback | Fire from change stream or app code |
+| Any other | Agent webhook fallback | `POST /v1/agent/events` with agent token |
+| Any (advanced) | Direct REST API | `POST /v1/events` with API key; app code required |
 
 ## 11. Analytics data design
 
@@ -632,6 +668,8 @@ Do not create separate React apps for individual pages. Developers can work in s
 - Useful tenant/application management pages.
 
 ### Defer unless core is complete
+- MySQL binlog connector for the agent (PostgreSQL WAL connector ships first).
+- MongoDB oplog connector for the agent.
 - Enterprise identity provider integration and complex RBAC.
 - Automatic provisioning of customer databases/infrastructure.
 - Kubernetes/cloud deployment.
@@ -643,8 +681,10 @@ Do not create separate React apps for individual pages. Developers can work in s
 
 ## 15. Final architecture principle
 
-Axyra's technical core is the **CDC agent + aggregation engine**: a lightweight Go agent that captures database changes at the WAL level (zero application instrumentation), reliable event streaming, correct precomputed aggregates and measurable tenant-isolated query performance. The Go control plane makes that engine reusable across any PostgreSQL-backed application. The single React `web/` app provides the platform management and analytics experience. The separate React reference client demonstrates how an existing product integrates with Axyra — without modifying a single line of its business logic.
+Axyra's technical core is the **CDC agent + aggregation engine**: a lightweight Go agent that captures database changes (zero application instrumentation for PostgreSQL; single HTTP call for other databases), reliable event streaming, correct precomputed aggregates and measurable tenant-isolated query performance. The Go control plane makes that engine reusable across any database-backed application. The single React `web/` app provides the platform management and analytics experience. The separate React reference client demonstrates how an existing product integrates with Axyra — without modifying a single line of its business logic.
 
-**The agent is the differentiator.** It solves the database consistency problem (events are guaranteed to reflect committed state), eliminates integration friction (no SDK or API calls in customer code) and enables on-prem/private-cloud deployments where data never leaves the customer's network.
+**The agent is the differentiator.** It solves the database consistency problem (events are guaranteed to reflect committed state), eliminates integration friction (no SDK or heavy API integration in customer code) and enables on-prem/private-cloud deployments where data never leaves the customer's network.
+
+**The connector interface is the extensibility story.** Starting with PostgreSQL WAL and an HTTP webhook fallback, the `source.Connector` abstraction makes it straightforward to add MySQL binlog, MongoDB oplog and other backends as connectors — without changing the rest of the pipeline.
 
 **Frontend count is fixed at two:** `reference-client/frontend` and `web`. All Axyra management, analytics, monitoring and configuration experiences are pages inside `web`.
