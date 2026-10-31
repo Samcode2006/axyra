@@ -59,12 +59,34 @@ type Order struct {
 	// had no earlier order for this tenant.
 	IsNewCustomer bool
 
-	// CreatedAt is the time of the order's first event (order_state.occurred_at).
+	// CreatedAt is the source order's creation time (order_state.occurred_at).
+	// Legacy or invalid timestamps fall back to the first event's time.
 	// Cohort-style tables are bucketed by this, never by the time of a later update.
 	CreatedAt time.Time
 }
 
 func (o *Order) cancelled() bool { return o.Status == "cancelled" }
+
+// orderCreatedAt accepts JSON timestamps and PostgreSQL logical-decoding text.
+// Event timestamps remain unchanged in raw_events for monitoring and replay.
+func orderCreatedAt(value interface{}, fallback time.Time) time.Time {
+	if t, ok := value.(time.Time); ok && !t.IsZero() {
+		return t.UTC()
+	}
+	if s, ok := value.(string); ok {
+		for _, layout := range []string{
+			time.RFC3339Nano,
+			"2006-01-02 15:04:05.999999999Z07:00",
+			"2006-01-02 15:04:05.999999999Z07",
+			"2006-01-02 15:04:05.999999999", // timestamp without time zone: UTC
+		} {
+			if t, err := time.Parse(layout, strings.TrimSpace(s)); err == nil && !t.IsZero() {
+				return t.UTC()
+			}
+		}
+	}
+	return fallback.UTC()
+}
 
 // returned reports whether the order was returned by the customer.
 func (o *Order) returned() bool { return o.Status == "returned" || o.FulfillmentStatus == "returned" }

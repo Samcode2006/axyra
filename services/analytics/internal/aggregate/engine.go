@@ -55,7 +55,7 @@ func ProcessOrderEvent(ctx context.Context, tx *sql.Tx, tenantID string, eventAt
 			next.carryExtended(prior)
 		}
 	} else {
-		next.CreatedAt = eventAt
+		next.CreatedAt = orderCreatedAt(data["created_at"], eventAt)
 	}
 
 	// Newness is decided when an order first becomes an extended order for a
@@ -76,7 +76,7 @@ func ProcessOrderEvent(ctx context.Context, tx *sql.Tx, tenantID string, eventAt
 	if exists {
 		old = prior
 	}
-	if err := apply(ctx, tx, tenantID, eventAt, old, &next); err != nil {
+	if err := apply(ctx, tx, tenantID, next.CreatedAt, old, &next); err != nil {
 		return err
 	}
 	return saveState(ctx, tx, tenantID, &next)
@@ -253,8 +253,8 @@ func apply(ctx context.Context, tx *sql.Tx, tenantID string, eventAt time.Time, 
 
 // ─── Flow tables: order_summary_hourly / order_summary_daily ─────────────────
 //
-// These books each change into the bucket of the event that caused it (a cancel
-// on day 3 is a negative on day 3), which is how they have always worked.
+// Changes adjust the original order's creation bucket, including cancellations.
+// This keeps trend totals consistent with the date-scoped cohort tables.
 
 const summaryWidth = 10
 

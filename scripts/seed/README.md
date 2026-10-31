@@ -30,6 +30,29 @@ cd scripts/seed
 
 ## What it generates
 
+### Historical chart data
+
+Analytics buckets orders by their source `created_at` in UTC. Later updates and
+cancellations adjust that original bucket. Missing or invalid creation timestamps
+fall back to the first event timestamp. Monitoring still uses event timestamps.
+
+From `scripts/seed`, for the database-per-store deployment:
+
+```powershell
+go run -mod=mod . -dsn "postgres://postgres:postgres@localhost:5433/reference_db" -rows 10000 -stores "store_001" -from "2026-10-01T00:00:00Z" -to "2026-10-31T23:59:59Z"
+```
+
+Store 2 uses port 5435 and `-stores "store_002"`. Select the matching Custom
+range and Daily interval in Analytics, then refresh after ingestion completes.
+Timestamps are sampled uniformly; for larger peaks and dips, run separate daily
+windows with different `-rows` counts. These commands add records.
+
+After upgrading from event-time bucketing, rebuild each affected tenant through
+`POST /v1/analytics/rebuild?tenant_id=...` while ingestion is idle. This replays
+stored raw events using the corrected dates; it does not import source rows that
+were never captured. Ensure `orders` is in the agent's PostgreSQL publication
+before seeding (restart the agent after initially creating the table).
+
 | Field | Detail |
 |---|---|
 | `id` | Unique hex order ID |
