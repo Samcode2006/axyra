@@ -15,19 +15,24 @@ const maxHealthyLagSeconds = 5 * 60
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	tenantID := h.resolveRequestTenant(r)
 
-	// Fetch the most recent processing watermark for this tenant.
+	// The tenant's freshness is the time and LSN of its own latest event.
+	//
+	// processing_watermarks is not used: it holds one row per AGENT, and its
+	// tenant_id is overwritten by whichever tenant's event arrived last. For an
+	// agent serving several tenants most of them would have no row, and would be
+	// reported healthy with LSN 0/0.
 	var lastLSN string
 	var lastProcessedAt time.Time
 
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT last_lsn, last_processed_at
-		FROM processing_watermarks
+		SELECT lsn, occurred_at
+		FROM raw_events
 		WHERE tenant_id = $1
-		ORDER BY last_processed_at DESC
+		ORDER BY occurred_at DESC, id DESC
 		LIMIT 1
 	`, tenantID).Scan(&lastLSN, &lastProcessedAt)
 	if err != nil && err != sql.ErrNoRows {
-		respondError(w, http.StatusInternalServerError, "Failed to query watermark")
+		respondError(w, http.StatusInternalServerError, "Failed to query freshness")
 		return
 	}
 	if err == sql.ErrNoRows || lastProcessedAt.IsZero() {

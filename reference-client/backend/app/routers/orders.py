@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..models import Order
-from ..schemas import OrderCreate, OrderUpdate, OrderOut, OrderListOut
+from ..schemas import FULFILLMENT_FOR_STATUS, OrderCreate, OrderUpdate, OrderOut, OrderListOut
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -16,6 +16,8 @@ async def create_order(body: OrderCreate, db: AsyncSession = Depends(get_db)):
     INSERT automatically from the PostgreSQL WAL via logical replication.
     """
     order = Order(**body.model_dump())
+    # A new order starts in the "placed" status, which is the "pending" stage.
+    order.fulfillment_status = FULFILLMENT_FOR_STATUS["placed"]
     db.add(order)
     await db.commit()
     await db.refresh(order)
@@ -51,14 +53,30 @@ async def get_order(order_id: str, db: AsyncSession = Depends(get_db)):
 @router.patch("/{order_id}", response_model=OrderOut)
 async def update_order(order_id: str, body: OrderUpdate, db: AsyncSession = Depends(get_db)):
     """
-    Update order status (e.g. placed → cancelled).
+    Update an order's status and, optionally, its fulfilment stage, payment
+    status or return reason (e.g. placed → cancelled, delivered → returned).
     The Axyra Agent captures this UPDATE from WAL automatically.
     """
     order = await db.get(Order, order_id)
     if not order:
         raise HTTPException(404, "Order not found")
+
     order.status = body.status
+    # The fulfilment stage follows the status unless the caller names one.
+    order.fulfillment_status = body.fulfillment_status or FULFILLMENT_FOR_STATUS[body.status]
+    if body.payment_status is not None:
+        order.payment_status = body.payment_status
+
+    is_return = body.status == "returned" or order.fulfillment_status == "returned"
+    if body.return_reason is not None and not is_return:
+        raise HTTPException(422, "return_reason can only be set on a returned order")
+    if is_return:
+        if body.return_reason is not None:
+            order.return_reason = body.return_reason
+    else:
+        # No longer a return, so a previous reason would be stale.
+        order.return_reason = ""
+
     await db.commit()
     await db.refresh(order)
     return order
-

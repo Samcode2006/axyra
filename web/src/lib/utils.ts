@@ -39,3 +39,14 @@ export function dateRangeParams(days = 7) {
   return { from, to };
 }
 
+/**
+ * A range of whole UTC days ending now: `days` = 1 is today since UTC midnight,
+ * 7 is today plus the six days before it. The analytics API rounds every range
+ * out to whole UTC days, so starting on a day boundary keeps hourly and daily
+ * panels in agreement.
+ */
+export function utcDayRange(days: number, now: Date = new Date()) {
+  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - (days - 1) * 86_400_000;
+  return { from: new Date(start).toISOString(), to: now.toISOString() };
+}
+

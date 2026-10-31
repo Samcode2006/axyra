@@ -265,3 +265,22 @@ html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
 .monitoring-rate-item { display: flex; align-items: center; gap: 12px; padding: 16px; background: var(--surface-2); border-radius: var(--radius); border: 1px solid var(--border); }
 .monitoring-rate-value { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
 .monitoring-rate-label { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* ─── Schema expansion: analytics panels ──────────────────────────────────── */
+.section-title { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin: 28px 0 12px; }
+.hbar-track { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; min-width: 60px; }
+.hbar-fill { height: 100%; border-radius: 4px; transition: width 0.2s; }
+.stack-bar { width: 100%; display: flex; flex-direction: column; border-radius: 4px 4px 0 0; overflow: hidden; min-height: 4px; }
+.legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.funnel { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.funnel-row { display: grid; grid-template-columns: 110px 1fr 150px; gap: 12px; align-items: center; font-size: 13px; }
+.funnel-label { text-transform: capitalize; color: var(--text-muted); }
+.funnel-value { text-align: right; font-variant-numeric: tabular-nums; }
+.alert-strip { border-radius: var(--radius); padding: 10px 16px; margin-bottom: 8px; font-size: 13px; border: 1px solid; }
+.alert-strip--warning { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); color: var(--amber); }
+.alert-strip--error { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.3); color: var(--red); }
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 56px; }
+.spark-bar { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.85; }
+
+/* A chart with only one or two buckets should not stretch each bar across the panel. */
+.trend-bar-wrap { max-width: 72px; }

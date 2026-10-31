@@ -1,14 +1,27 @@
 package handlers
 
 import (
-	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/axyra/analytics/internal/models"
 )
 
+// productSort maps the sort_by parameter to a fixed ORDER BY expression.
+// Only values from this map ever reach the SQL text.
+var productSort = map[string]string{
+	"revenue":  "total_revenue DESC",
+	"quantity": "quantity_sold DESC",
+	"returns":  "return_count DESC",
+}
+
+// TopProducts returns the top products by revenue, units sold or returns.
+//
+// GET /v1/analytics/products/top?limit=20&sort_by=revenue|quantity|returns[&from=&to=]
+//
+// Without a range it reads the precomputed product_aggregates (all time). With
+// from/to it aggregates order_state for orders created in the range. Both
+// count only non-cancelled orders, so the two modes agree where they overlap.
 func (h *Handler) TopProducts(w http.ResponseWriter, r *http.Request) {
 	tenantID := h.resolveRequestTenant(r)
 
@@ -18,101 +31,112 @@ func (h *Handler) TopProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	defer done()
 
-	limit := 10
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
-			limit = parsed
-		}
+	limit := intParam(r, "limit", 10, 1, 100)
+
+	sortBy := r.URL.Query().Get("sort_by")
+	if sortBy == "" {
+		sortBy = "revenue"
+	}
+	orderBy, ok := productSort[sortBy]
+	if !ok {
+		respondError(w, http.StatusBadRequest, "sort_by must be one of revenue, quantity, returns")
+		return
 	}
 
-	// Parse optional time range. When provided, scope the query to order_state
-	// rows whose occurred_at falls in [from, to]. Without a range, use the
-	// pre-computed product_aggregates table for maximum speed.
+	q := r.URL.Query()
 	var fromTime, toTime time.Time
-	hasRange := false
-
-	if f := r.URL.Query().Get("from"); f != "" {
-		if t, err := time.Parse(time.RFC3339, f); err == nil {
-			fromTime = t.UTC()
-			hasRange = true
-		}
-	}
-	if ts := r.URL.Query().Get("to"); ts != "" {
-		if t, err := time.Parse(time.RFC3339, ts); err == nil {
-			toTime = t.UTC()
-		}
-	}
-	if hasRange && toTime.IsZero() {
-		toTime = time.Now().UTC()
-	}
-
-	var products []models.TopProduct
-
+	hasRange := q.Get("from") != "" || q.Get("to") != ""
 	if hasRange {
-		// Time-scoped: aggregate live from order_state
-		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT
-				product_id,
-				MAX(product_name) AS product_name,
-				MAX(category)     AS category,
-				COUNT(*)          AS order_count,
-				COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN amount ELSE 0 END), 0) AS total_revenue
-			FROM order_state
-			WHERE tenant_id = $1
-			  AND occurred_at >= $2
-			  AND occurred_at <= $3
-			  AND product_id <> ''
-			GROUP BY product_id
-			ORDER BY total_revenue DESC
-			LIMIT $4
-		`, tenantID, fromTime, toTime, limit)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
+		win, ok := parseRangeExact(w, r)
+		if !ok {
 			return
 		}
-		defer rows.Close()
+		fromTime, toTime = win.Start, win.End
+	}
 
-		products = make([]models.TopProduct, 0)
-		for rows.Next() {
-			var p models.TopProduct
-			if err := rows.Scan(&p.ProductID, &p.ProductName, &p.Category, &p.OrderCount, &p.Revenue); err != nil {
-				respondError(w, http.StatusInternalServerError, fmt.Sprintf("Scan error: %v", err))
-				return
-			}
-			products = append(products, p)
-		}
-		if err := rows.Err(); err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Row error: %v", err))
-			return
-		}
+	var query string
+	var args []interface{}
+	if hasRange {
+		// Aggregate live from order_state. Quantity, discount and returns are
+		// only known for extended (schema v2) orders.
+		query = `
+			SELECT product_id, MAX(product_name), MAX(category),
+			       COUNT(*) FILTER (WHERE status <> 'cancelled'),
+			       COALESCE(SUM(amount) FILTER (WHERE status <> 'cancelled'), 0) AS total_revenue,
+			       COALESCE(SUM(quantity) FILTER (WHERE status <> 'cancelled' AND has_extended), 0)::bigint AS quantity_sold,
+			       COALESCE(SUM(discount_amount) FILTER (WHERE status <> 'cancelled' AND has_extended), 0),
+			       COUNT(*) FILTER (WHERE status <> 'cancelled' AND has_extended
+			                          AND (status = 'returned' OR fulfillment_status = 'returned')) AS return_count
+			FROM order_state
+			WHERE tenant_id = $1 AND occurred_at >= $2 AND occurred_at < $3 AND product_id <> ''
+			GROUP BY product_id
+			ORDER BY ` + orderBy + `, product_id
+			LIMIT $4`
+		args = []interface{}{tenantID, fromTime, toTime, limit}
 	} else {
-		// All-time: use pre-computed aggregates for speed
-		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT product_id, product_name, category, order_count, total_revenue
+		query = `
+			SELECT product_id, product_name, category, order_count, total_revenue, quantity_sold, total_discount, return_count
 			FROM product_aggregates
 			WHERE tenant_id = $1
-			ORDER BY total_revenue DESC
-			LIMIT $2
-		`, tenantID, limit)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
-			return
-		}
-		defer rows.Close()
-
-		products = make([]models.TopProduct, 0)
-		for rows.Next() {
-			var p models.TopProduct
-			if err := rows.Scan(&p.ProductID, &p.ProductName, &p.Category, &p.OrderCount, &p.Revenue); err != nil {
-				respondError(w, http.StatusInternalServerError, fmt.Sprintf("Scan error: %v", err))
-				return
-			}
-			products = append(products, p)
-		}
+			ORDER BY ` + orderBy + `, product_id
+			LIMIT $2`
+		args = []interface{}{tenantID, limit}
 	}
 
-	respondJSON(w, http.StatusOK, models.TopProductsResponse{
-		TenantID: tenantID,
-		Data:     products,
-	})
+	rows, err := h.db.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		queryFailed(w, r, err)
+		return
+	}
+	defer rows.Close()
+
+	products := make([]models.TopProduct, 0)
+	for rows.Next() {
+		var p models.TopProduct
+		if err := rows.Scan(&p.ProductID, &p.ProductName, &p.Category, &p.OrderCount, &p.Revenue,
+			&p.QuantitySold, &p.TotalDiscount, &p.ReturnCount); err != nil {
+			queryFailed(w, r, err)
+			return
+		}
+		p.TotalRevenue = p.Revenue
+		p.ReturnRatePct = pct(float64(p.ReturnCount), float64(p.OrderCount))
+		p.AvgUnitPrice = ratio(p.Revenue, float64(p.QuantitySold))
+		p.TotalDiscount = round2(p.TotalDiscount)
+		products = append(products, p)
+	}
+	if err := rows.Err(); err != nil {
+		queryFailed(w, r, err)
+		return
+	}
+
+	respondJSON(w, http.StatusOK, models.TopProductsResponse{TenantID: tenantID, Data: products})
+}
+
+// parseRangeExact is parseWindow for handlers that have always filtered
+// order_state by the exact timestamps given (not whole days): [from, to].
+// `to` is made exclusive by a nanosecond so the semantics stay inclusive.
+func parseRangeExact(w http.ResponseWriter, r *http.Request) (window, bool) {
+	now := time.Now().UTC()
+	from, to := now.Add(-7*24*time.Hour), now
+	if s := r.URL.Query().Get("from"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "from must be an RFC 3339 timestamp")
+			return window{}, false
+		}
+		from = t.UTC()
+	}
+	if s := r.URL.Query().Get("to"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "to must be an RFC 3339 timestamp")
+			return window{}, false
+		}
+		to = t.UTC()
+	}
+	if from.After(to) {
+		respondError(w, http.StatusBadRequest, "from must not be after to")
+		return window{}, false
+	}
+	return window{Start: from, End: to.Add(time.Nanosecond)}, true
 }

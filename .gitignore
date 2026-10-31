@@ -26,3 +26,6 @@ venv/
 .vscode/
 .idea/
 
+
+# Compiled seeder binary (build with scripts/seed/run_seed.sh)
+scripts/seed/bulk_seed

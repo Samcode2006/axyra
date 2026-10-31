@@ -152,14 +152,6 @@ func SeedDefaultData(db *sql.DB, opts SeedOptions) error {
 }
 
 func seedDemoTenancy(db *sql.DB, agentToken string) error {
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM organizations").Scan(&count); err != nil {
-		return fmt.Errorf("check organizations count: %w", err)
-	}
-	if count > 0 {
-		return nil // already seeded
-	}
-
 	log.Println("[control-plane-db] seeding default demo data...")
 
 	tx, err := db.Begin()
@@ -188,12 +180,18 @@ func seedDemoTenancy(db *sql.DB, agentToken string) error {
 		{"tenants", `INSERT INTO tenants (id, organization_id, external_tenant_id, name, status, max_events_per_day, max_concurrent_queries, created_at)
 			VALUES
 				('tenant_001', 'org_demo', 'store_001', 'Store 1 (North)', 'active', 1000000, 10, NOW()),
-				('tenant_002', 'org_demo', 'store_002', 'Store 2 (South)', 'active', 1000000, 10, NOW())
+				('tenant_002', 'org_demo', 'store_002', 'Store 2 (South)', 'active', 1000000, 10, NOW()),
+				('tenant_003', 'org_demo', 'store_003', 'Store 3 (East)', 'active', 1000000, 10, NOW()),
+				('tenant_004', 'org_demo', 'store_004', 'Store 4 (West)', 'active', 1000000, 10, NOW()),
+				('tenant_005', 'org_demo', 'store_005', 'Store 5 (Central)', 'active', 1000000, 10, NOW())
 			ON CONFLICT (id) DO NOTHING`, nil},
 		{"tenant mappings", `INSERT INTO tenant_mappings (id, agent_id, external_tenant_id, tenant_id, created_at)
 			VALUES
 				('map_001', 'agent_ref_demo', 'store_001', 'tenant_001', NOW()),
-				('map_002', 'agent_ref_demo', 'store_002', 'tenant_002', NOW())
+				('map_002', 'agent_ref_demo', 'store_002', 'tenant_002', NOW()),
+				('map_003', 'agent_ref_demo', 'store_003', 'tenant_003', NOW()),
+				('map_004', 'agent_ref_demo', 'store_004', 'tenant_004', NOW()),
+				('map_005', 'agent_ref_demo', 'store_005', 'tenant_005', NOW())
 			ON CONFLICT (id) DO NOTHING`, nil},
 	}
 	for _, s := range stmts {

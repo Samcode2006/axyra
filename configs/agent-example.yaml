@@ -27,6 +27,22 @@ tables:
       - product_id
       - product_name
       - category
+      - customer_id
+      - customer_tier
+      - payment_method
+      - payment_status
+      - discount_code
+      - discount_amount
+      - tax_amount
+      - shipping_cost
+      - quantity
+      - sku
+      - fulfillment_status
+      - return_reason
+      - country
+      - state_province
+      - city
+      - channel
+      - referrer_source
       - created_at
       - updated_at
-

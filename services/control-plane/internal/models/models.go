@@ -108,13 +108,18 @@ type UpdateTenantQuota struct {
 }
 
 type Tenant struct {
-	ID               string       `json:"id"`
-	OrganizationID   string       `json:"organization_id"`
-	ExternalTenantID string       `json:"external_tenant_id"`
-	Name             string       `json:"name"`
-	Status           string       `json:"status"` // 'active' | 'suspended' | 'inactive'
-	Quota            *TenantQuota `json:"quota,omitempty"`
-	CreatedAt        time.Time    `json:"created_at"`
+	ID               string          `json:"id"`
+	OrganizationID   string          `json:"organization_id"`
+	ExternalTenantID string          `json:"external_tenant_id"`
+	Name             string          `json:"name"`
+	Status           string          `json:"status"` // 'active' | 'suspended' | 'inactive'
+	Quota            *TenantQuota    `json:"quota,omitempty"`
+	Region           string          `json:"region"`        // 'apac' | 'emea' | 'americas' | 'global'
+	PlanTier         string          `json:"plan_tier"`     // 'free' | 'growth' | 'enterprise'
+	BillingCycle     string          `json:"billing_cycle"` // 'monthly' | 'annual'
+	Tags             []string        `json:"tags"`
+	Metadata         json.RawMessage `json:"metadata"`
+	CreatedAt        time.Time       `json:"created_at"`
 }
 
 type CreateTenantRequest struct {
@@ -122,12 +127,23 @@ type CreateTenantRequest struct {
 	ExternalTenantID string             `json:"external_tenant_id"`
 	Name             string             `json:"name"`
 	Quota            *UpdateTenantQuota `json:"quota,omitempty"`
+	Region           *string            `json:"region,omitempty"`
+	PlanTier         *string            `json:"plan_tier,omitempty"`
+	BillingCycle     *string            `json:"billing_cycle,omitempty"`
+	Tags             []string           `json:"tags,omitempty"`
+	Metadata         json.RawMessage    `json:"metadata,omitempty"`
 }
 
 type UpdateTenantRequest struct {
-	Name   *string            `json:"name,omitempty"`
-	Status *string            `json:"status,omitempty"`
-	Quota  *UpdateTenantQuota `json:"quota,omitempty"`
+	Name         *string            `json:"name,omitempty"`
+	Status       *string            `json:"status,omitempty"`
+	Quota        *UpdateTenantQuota `json:"quota,omitempty"`
+	Region       *string            `json:"region,omitempty"`
+	PlanTier     *string            `json:"plan_tier,omitempty"`
+	BillingCycle *string            `json:"billing_cycle,omitempty"`
+	// Tags replaces the whole list when present (an empty list clears it).
+	Tags     *[]string       `json:"tags,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 type TenantMapping struct {

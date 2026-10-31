@@ -20,6 +20,31 @@ type AxyraEvent struct {
 	Data             map[string]interface{} `json:"data"`
 }
 
+// extendedColumns are the order columns introduced by schema v2. An event whose
+// data carries any of them is a v2 event; otherwise it stays v1, so a database
+// without these columns keeps producing exactly the events it always did.
+// customer_email is deliberately absent: it is never sent to the platform.
+var extendedColumns = []string{
+	"customer_id", "customer_tier", "payment_method", "payment_status", "discount_code",
+	"discount_amount", "tax_amount", "shipping_cost", "quantity", "sku", "fulfillment_status",
+	"return_reason", "country", "state_province", "city", "channel", "referrer_source",
+}
+
+const (
+	schemaV1 = 1
+	schemaV2 = 2
+)
+
+// schemaVersionFor returns 2 when data carries any extended column.
+func schemaVersionFor(data map[string]interface{}) int {
+	for _, c := range extendedColumns {
+		if _, ok := data[c]; ok {
+			return schemaV2
+		}
+	}
+	return schemaV1
+}
+
 type Mapper struct {
 	cfg *config.Config
 }
@@ -124,10 +149,9 @@ func (m *Mapper) Map(ce connector.ChangeEvent) (*AxyraEvent, error) {
 		AgentID:          m.cfg.AgentID,
 		ExternalTenantID: extTenantID,
 		EventType:        eventType,
-		SchemaVersion:    1,
+		SchemaVersion:    schemaVersionFor(data),
 		OccurredAt:       occurredAt,
 		LSN:              ce.LSN,
 		Data:             data,
 	}, nil
 }
-

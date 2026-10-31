@@ -20,23 +20,45 @@ import (
 // Source is the only data model metrics can aggregate today.
 const SourceOrders = "orders"
 
+// These allowlists must stay identical to the ones in the analytics service
+// (services/analytics/internal/handlers/metricquery.go), which re-checks every
+// definition before building SQL. They follow docs/schema-expansion-plan.md
+// section 8. A definition that passes here but not there would be stored and
+// then fail at query time.
 var (
 	aggregations = map[string]bool{"count": true, "sum": true, "avg": true, "min": true, "max": true, "count_distinct": true}
 
 	// numericFields can be used with sum/avg/min/max.
-	numericFields = map[string]bool{"amount": true}
+	numericFields = set("amount", "discount_amount", "tax_amount", "shipping_cost", "quantity")
 
-	// distinctFields can be used with count_distinct.
-	distinctFields = map[string]bool{"order_id": true, "product_id": true, "category": true, "status": true}
+	// distinctFields can be used with count_distinct. order_id is kept for
+	// definitions created before the expansion.
+	distinctFields = set("order_id", "status", "category", "product_id", "currency",
+		"payment_method", "channel", "country", "customer_tier", "fulfillment_status", "sku")
 
-	// dimensionFields can be used in group_by and in filters.
-	dimensionFields = map[string]bool{"status": true, "category": true, "product_id": true, "currency": true}
+	// dimensionFields can be used in group_by.
+	dimensionFields = set("status", "category", "product_id", "currency",
+		"payment_method", "channel", "country", "customer_tier", "fulfillment_status", "referrer_source")
+
+	// filterFields can be used in filters. It is wider than group_by: it also
+	// allows payment_status and return_reason.
+	filterFields = set("status", "category", "currency", "product_id",
+		"payment_method", "channel", "country", "customer_tier", "fulfillment_status", "payment_status",
+		"referrer_source", "return_reason")
 
 	filterOps     = map[string]bool{"eq": true, "neq": true, "in": true}
 	granularities = map[string]bool{"hour": true, "day": true}
 
 	idPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{2,63}$`)
 )
+
+func set(keys ...string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[k] = true
+	}
+	return m
+}
 
 const (
 	maxGroupBy       = 2
@@ -153,8 +175,8 @@ func (c *Config) Validate() error {
 }
 
 func (f *Filter) validate() error {
-	if !dimensionFields[f.Field] {
-		return fmt.Errorf("field %q must be one of %s", f.Field, keys(dimensionFields))
+	if !filterFields[f.Field] {
+		return fmt.Errorf("field %q must be one of %s", f.Field, keys(filterFields))
 	}
 	if !filterOps[f.Op] {
 		return fmt.Errorf("op %q must be one of %s", f.Op, keys(filterOps))

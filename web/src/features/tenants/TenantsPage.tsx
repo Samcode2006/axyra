@@ -8,6 +8,18 @@ import type { Organization, Tenant } from '../../types';
 
 const PER_PAGE = 25;
 
+const REGIONS = ['global', 'apac', 'emea', 'americas'] as const;
+const PLANS = ['free', 'growth', 'enterprise'] as const;
+const CYCLES = ['monthly', 'annual'] as const;
+
+const EMPTY_FORM = {
+  name: '', external_tenant_id: '', organization_id: '', events: '', queries: '',
+  region: 'global', plan_tier: 'growth', billing_cycle: 'monthly', tags: '',
+};
+
+/** "vip, eu-west" -> ["vip", "eu-west"]. The server also trims, lowercases and de-duplicates. */
+const parseTags = (s: string) => s.split(',').map((t) => t.trim()).filter(Boolean);
+
 export default function TenantsPage() {
   const operator = auth.isOperator();
   const [list, setList] = useState<Tenant[]>([]);
@@ -19,7 +31,9 @@ export default function TenantsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [quotaForm, setQuotaForm] = useState({ events: '', queries: '' });
-  const [form, setForm] = useState({ name: '', external_tenant_id: '', organization_id: '', events: '', queries: '' });
+  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [profileEdit, setProfileEdit] = useState<string | null>(null);
+  const [profile, setProfile] = useState({ region: 'global', plan_tier: 'growth', billing_cycle: 'monthly', tags: '' });
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
@@ -61,9 +75,13 @@ export default function TenantsPage() {
         external_tenant_id: form.external_tenant_id,
         organization_id: operator ? form.organization_id : undefined,
         quota: events || queries ? { max_events_per_day: events, max_concurrent_queries: queries } : undefined,
+        region: form.region as Tenant['region'],
+        plan_tier: form.plan_tier as Tenant['plan_tier'],
+        billing_cycle: form.billing_cycle as Tenant['billing_cycle'],
+        tags: parseTags(form.tags),
       });
       setShowForm(false);
-      setForm({ name: '', external_tenant_id: '', organization_id: '', events: '', queries: '' });
+      setForm({ ...EMPTY_FORM });
     });
     setSubmitting(false);
   };
@@ -82,6 +100,22 @@ export default function TenantsPage() {
         quota: { max_events_per_day: num(quotaForm.events), max_concurrent_queries: num(quotaForm.queries) },
       });
       setEditing(null);
+    });
+
+  const startProfile = (t: Tenant) => {
+    setProfileEdit(t.id);
+    setProfile({ region: t.region, plan_tier: t.plan_tier, billing_cycle: t.billing_cycle, tags: t.tags.join(', ') });
+  };
+
+  const saveProfile = (t: Tenant) =>
+    run(async () => {
+      await tenantsApi.update(t.id, {
+        region: profile.region as Tenant['region'],
+        plan_tier: profile.plan_tier as Tenant['plan_tier'],
+        billing_cycle: profile.billing_cycle as Tenant['billing_cycle'],
+        tags: parseTags(profile.tags),
+      });
+      setProfileEdit(null);
     });
 
   const remove = (t: Tenant) => {
@@ -133,6 +167,27 @@ export default function TenantsPage() {
               <input type="number" min={1} max={1000} value={form.queries} onChange={(e) => setForm({ ...form, queries: e.target.value })} placeholder="10" />
             </label>
           </div>
+          <div className="form-row">
+            <label>Region
+              <select value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })}>
+                {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <label>Plan
+              <select value={form.plan_tier} onChange={(e) => setForm({ ...form, plan_tier: e.target.value })}>
+                {PLANS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <label>Billing
+              <select value={form.billing_cycle} onChange={(e) => setForm({ ...form, billing_cycle: e.target.value })}>
+                {CYCLES.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <label>Tags
+              <input value={form.tags} onChange={(e) => setForm({ ...form, tags: e.target.value })} placeholder="vip, eu-west" />
+              <span className="hint">Comma separated, up to 20.</span>
+            </label>
+          </div>
           <button type="submit" className="btn btn--primary" disabled={submitting}>
             {submitting ? 'Creating…' : 'Create'}
           </button>
@@ -150,6 +205,7 @@ export default function TenantsPage() {
                 <th>External ID</th>
                 {operator && <th>Organization</th>}
                 <th>Status</th>
+                <th>Plan</th>
                 <th>Quota</th>
                 <th>Actions</th>
               </tr>
@@ -161,6 +217,38 @@ export default function TenantsPage() {
                   <td className="mono">{t.external_tenant_id}</td>
                   {operator && <td>{orgName(t.organization_id)}</td>}
                   <td><Badge status={t.status} /></td>
+                  <td>
+                    {profileEdit === t.id ? (
+                      <div className="inline-form">
+                        <label>Region
+                          <select value={profile.region} onChange={(e) => setProfile({ ...profile, region: e.target.value })}>
+                            {REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </label>
+                        <label>Plan
+                          <select value={profile.plan_tier} onChange={(e) => setProfile({ ...profile, plan_tier: e.target.value })}>
+                            {PLANS.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </label>
+                        <label>Billing
+                          <select value={profile.billing_cycle} onChange={(e) => setProfile({ ...profile, billing_cycle: e.target.value })}>
+                            {CYCLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </label>
+                        <label>Tags
+                          <input value={profile.tags} onChange={(e) => setProfile({ ...profile, tags: e.target.value })} />
+                        </label>
+                        <button className="btn btn--primary btn--sm" onClick={() => void saveProfile(t)}>Save</button>
+                        <button className="btn btn--sm" onClick={() => setProfileEdit(null)}>Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        {t.plan_tier} · {t.billing_cycle}
+                        <div className="hint">{t.region}{t.tags.length > 0 && ` · ${t.tags.join(', ')}`}</div>
+                        <button className="btn btn--sm" onClick={() => startProfile(t)}>Edit</button>
+                      </>
+                    )}
+                  </td>
                   <td>
                     {editing === t.id ? (
                       <div className="inline-form">

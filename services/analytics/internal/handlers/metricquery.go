@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // metricConfigShape mirrors the MetricConfig type in the control plane
@@ -146,89 +150,133 @@ func (h *Handler) fetchMetricDef(ctx context.Context, metricID string) (*metricD
 	}, nil
 }
 
+// Allowlists for config-driven metrics (schema expansion plan, section 8).
+// Column names are only ever taken from these maps, never from the definition,
+// so a metric can never put arbitrary text into the SQL. extended marks columns
+// that exist only for schema v2 orders: a query that touches one is limited to
+// those orders, because v1 orders hold column defaults there, not real data.
+//
+// order_id is accepted for count_distinct for compatibility: the control plane
+// has always allowed it, so existing definitions that use it keep working.
+type column struct{ extended bool }
+
+var (
+	metricNumeric = map[string]column{
+		"amount": {}, "discount_amount": {extended: true}, "tax_amount": {extended: true},
+		"shipping_cost": {extended: true}, "quantity": {extended: true},
+	}
+	metricDistinct = map[string]column{
+		"order_id": {}, "status": {}, "category": {}, "product_id": {}, "currency": {},
+		"payment_method": {extended: true}, "channel": {extended: true}, "country": {extended: true},
+		"customer_tier": {extended: true}, "fulfillment_status": {extended: true}, "sku": {extended: true},
+	}
+	metricGroupBy = map[string]column{
+		"status": {}, "category": {}, "product_id": {}, "currency": {},
+		"payment_method": {extended: true}, "channel": {extended: true}, "country": {extended: true},
+		"customer_tier": {extended: true}, "fulfillment_status": {extended: true}, "referrer_source": {extended: true},
+	}
+	metricFilter = map[string]column{
+		"status": {}, "category": {}, "currency": {}, "product_id": {},
+		"payment_method": {extended: true}, "channel": {extended: true}, "country": {extended: true},
+		"customer_tier": {extended: true}, "fulfillment_status": {extended: true}, "payment_status": {extended: true},
+		"referrer_source": {extended: true}, "return_reason": {extended: true},
+	}
+)
+
+func keysOf(m map[string]column) string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
 // executeMetric runs a safe aggregate query derived from the metric config.
-// Only the order_state source is supported; aggregations are count/sum/avg/min/max.
+// Only the order_state source is supported.
 func (h *Handler) executeMetric(ctx context.Context, tenantID string, def *metricDefinitionResp, from, to time.Time) (interface{}, error) {
 	if def.Config.Source != "orders" {
 		return nil, fmt.Errorf("unsupported source %q (only 'orders' is supported)", def.Config.Source)
 	}
 
-	// Build an allowlisted aggregate expression
-	var aggExpr string
+	needsExtended := false
 	field := def.Config.Field
+
+	var aggExpr string
 	switch def.Config.Aggregation {
 	case "count":
 		aggExpr = "COUNT(*)"
-	case "sum":
-		if field == "" || field == "amount" {
-			aggExpr = "COALESCE(SUM(amount), 0)"
-		} else {
-			return nil, fmt.Errorf("sum only supports field=amount")
+	case "sum", "avg", "min", "max":
+		if field == "" {
+			field = "amount" // historical default
 		}
-	case "avg":
-		if field == "" || field == "amount" {
-			aggExpr = "COALESCE(AVG(amount), 0)"
-		} else {
-			return nil, fmt.Errorf("avg only supports field=amount")
+		col, ok := metricNumeric[field]
+		if !ok {
+			return nil, fmt.Errorf("%s supports fields: %s", def.Config.Aggregation, keysOf(metricNumeric))
 		}
-	case "min":
-		if field == "" || field == "amount" {
-			aggExpr = "COALESCE(MIN(amount), 0)"
-		} else {
-			return nil, fmt.Errorf("min only supports field=amount")
-		}
-	case "max":
-		if field == "" || field == "amount" {
-			aggExpr = "COALESCE(MAX(amount), 0)"
-		} else {
-			return nil, fmt.Errorf("max only supports field=amount")
-		}
+		needsExtended = needsExtended || col.extended
+		aggExpr = fmt.Sprintf("COALESCE(%s(%s), 0)", strings.ToUpper(def.Config.Aggregation), field)
 	case "count_distinct":
-		// Only allow counting distinct values for allowlisted columns
-		allowedDistinct := map[string]bool{"status": true, "category": true, "product_id": true, "currency": true}
-		if field == "" || !allowedDistinct[field] {
-			return nil, fmt.Errorf("count_distinct only supports fields: status, category, product_id, currency")
+		col, ok := metricDistinct[field]
+		if !ok {
+			return nil, fmt.Errorf("count_distinct supports fields: %s", keysOf(metricDistinct))
 		}
+		needsExtended = needsExtended || col.extended
 		aggExpr = fmt.Sprintf("COUNT(DISTINCT %s)", field)
 	default:
 		return nil, fmt.Errorf("unsupported aggregation %q", def.Config.Aggregation)
 	}
 
-	// Build WHERE clause: tenant + time range + allowlisted filters
+	// WHERE: tenant + time range + allowlisted filters. An unknown filter is an
+	// error: silently ignoring it would return a wrong number.
 	args := []interface{}{tenantID, from, to}
 	whereExtra := ""
 	for _, f := range def.Config.Filters {
-		// Only allow filtering on allowlisted columns
-		allowedFilters := map[string]bool{"status": true, "category": true, "currency": true, "product_id": true}
-		if !allowedFilters[f.Field] {
-			continue
+		col, ok := metricFilter[f.Field]
+		if !ok {
+			return nil, fmt.Errorf("filter field %q is not supported (allowed: %s)", f.Field, keysOf(metricFilter))
 		}
+		needsExtended = needsExtended || col.extended
 		switch f.Op {
-		case "eq":
+		case "eq", "neq":
 			args = append(args, fmt.Sprintf("%v", f.Value))
-			whereExtra += fmt.Sprintf(" AND %s = $%d", f.Field, len(args))
-		case "neq":
-			args = append(args, fmt.Sprintf("%v", f.Value))
-			whereExtra += fmt.Sprintf(" AND %s <> $%d", f.Field, len(args))
+			op := "="
+			if f.Op == "neq" {
+				op = "<>"
+			}
+			whereExtra += fmt.Sprintf(" AND %s %s $%d", f.Field, op, len(args))
+		case "in":
+			vals, ok := stringList(f.Value)
+			if !ok || len(vals) == 0 {
+				return nil, fmt.Errorf("filter on %q with op \"in\" needs a non-empty list of strings", f.Field)
+			}
+			args = append(args, pq.Array(vals))
+			whereExtra += fmt.Sprintf(" AND %s = ANY($%d)", f.Field, len(args))
+		default:
+			return nil, fmt.Errorf("filter op %q is not supported (eq, neq, in)", f.Op)
 		}
 	}
 
 	groupByClause := ""
 	selectExtra := ""
 	if len(def.Config.GroupBy) > 0 {
-		allowedGroupBy := map[string]bool{"status": true, "category": true, "currency": true, "product_id": true}
-		var cols []string
-		for _, col := range def.Config.GroupBy {
-			if allowedGroupBy[col] {
-				cols = append(cols, col)
+		cols := make([]string, 0, len(def.Config.GroupBy))
+		for _, c := range def.Config.GroupBy {
+			col, ok := metricGroupBy[c]
+			if !ok {
+				return nil, fmt.Errorf("group_by field %q is not supported (allowed: %s)", c, keysOf(metricGroupBy))
 			}
+			needsExtended = needsExtended || col.extended
+			cols = append(cols, c)
 		}
-		if len(cols) > 0 {
-			for _, col := range cols {
-				selectExtra += ", " + col
-			}
-			groupByClause = "GROUP BY " + joinCols(cols)
+		for _, c := range cols {
+			selectExtra += ", " + c
 		}
+		groupByClause = "GROUP BY " + joinCols(cols)
+	}
+
+	if needsExtended {
+		whereExtra += " AND has_extended"
 	}
 
 	query := fmt.Sprintf(`
@@ -260,7 +308,12 @@ func (h *Handler) executeMetric(ctx context.Context, tenantID string, def *metri
 		}
 		row := make(map[string]interface{}, len(cols))
 		for i, col := range cols {
-			row[col] = vals[i]
+			// lib/pq returns NUMERIC and text as []byte; make them JSON-friendly.
+			if b, ok := vals[i].([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = vals[i]
+			}
 		}
 		results = append(results, row)
 	}
@@ -274,6 +327,23 @@ func (h *Handler) executeMetric(ctx context.Context, tenantID string, def *metri
 		return results[0], nil
 	}
 	return results, nil
+}
+
+// stringList converts a decoded JSON array of strings.
+func stringList(v any) ([]string, bool) {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(arr))
+	for _, x := range arr {
+		s, ok := x.(string)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return out, true
 }
 
 func joinCols(cols []string) string {

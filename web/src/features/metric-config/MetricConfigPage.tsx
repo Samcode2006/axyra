@@ -8,9 +8,23 @@ import type { Aggregation, MetricConfig, MetricDefinition, MetricFilter } from '
 // These lists mirror the control plane's whitelists. The server re-validates
 // everything; metrics are declarative and can never carry SQL.
 const AGGREGATIONS: Aggregation[] = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'];
-const NUMERIC_FIELDS = ['amount'];
-const DISTINCT_FIELDS = ['order_id', 'product_id', 'category', 'status'];
-const DIMENSIONS = ['status', 'category', 'product_id', 'currency'];
+// Kept identical to the allowlists in the control plane (internal/metrics) and
+// analytics (handlers/metricquery.go); docs/schema-expansion-plan.md section 8.
+const NUMERIC_FIELDS = ['amount', 'discount_amount', 'tax_amount', 'shipping_cost', 'quantity'];
+const DISTINCT_FIELDS = [
+  'order_id', 'status', 'category', 'product_id', 'currency',
+  'payment_method', 'channel', 'country', 'customer_tier', 'fulfillment_status', 'sku',
+];
+const GROUP_BY_FIELDS = [
+  'status', 'category', 'product_id', 'currency',
+  'payment_method', 'channel', 'country', 'customer_tier', 'fulfillment_status', 'referrer_source',
+];
+// Filters accept everything group_by does, plus payment_status and return_reason.
+const FILTER_FIELDS = [
+  'status', 'category', 'currency', 'product_id',
+  'payment_method', 'channel', 'country', 'customer_tier', 'fulfillment_status', 'payment_status',
+  'referrer_source', 'return_reason',
+];
 
 const EMPTY = {
   id: '', name: '', description: '', aggregation: 'count' as Aggregation, field: '',
@@ -168,7 +182,7 @@ export default function MetricConfigPage() {
             <div>
               <p className="hint">Group by (up to 2)</p>
               <div className="row-actions">
-                {DIMENSIONS.map((d) => (
+                {GROUP_BY_FIELDS.map((d) => (
                   <button type="button" key={d} className={`btn btn--sm ${form.groupBy.includes(d) ? 'btn--active' : ''}`}
                     disabled={!form.groupBy.includes(d) && form.groupBy.length >= 2}
                     onClick={() => setForm({ ...form, groupBy: toggle(form.groupBy, d) })}>{d}</button>
@@ -189,7 +203,7 @@ export default function MetricConfigPage() {
             <label>Filter field (optional)
               <select value={form.filterField} onChange={(e) => setForm({ ...form, filterField: e.target.value })}>
                 <option value="">No filter</option>
-                {DIMENSIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+                {FILTER_FIELDS.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
             </label>
             {form.filterField && (

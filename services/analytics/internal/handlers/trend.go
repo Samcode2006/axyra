@@ -41,7 +41,7 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 
 	if interval == "hour" {
 		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT bucket, total_orders, total_revenue
+			SELECT bucket, total_orders, total_revenue, total_discount, new_customer_orders
 			FROM order_summary_hourly
 			WHERE tenant_id = $1 AND bucket >= $2 AND bucket <= $3
 			ORDER BY bucket ASC
@@ -54,7 +54,7 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 
 		for rows.Next() {
 			var p models.TrendPoint
-			if err := rows.Scan(&p.Bucket, &p.OrderCount, &p.Revenue); err != nil {
+			if err := rows.Scan(&p.Bucket, &p.OrderCount, &p.Revenue, &p.Discount, &p.NewCustomers); err != nil {
 				respondError(w, http.StatusInternalServerError, fmt.Sprintf("Scan error: %v", err))
 				return
 			}
@@ -62,7 +62,7 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT bucket, total_orders, total_revenue
+			SELECT bucket, total_orders, total_revenue, total_discount, new_customer_orders
 			FROM order_summary_daily
 			WHERE tenant_id = $1 AND bucket >= $2::date AND bucket <= $3::date
 			ORDER BY bucket ASC
@@ -76,7 +76,7 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var p models.TrendPoint
 			var dateStr string
-			if err := rows.Scan(&dateStr, &p.OrderCount, &p.Revenue); err != nil {
+			if err := rows.Scan(&dateStr, &p.OrderCount, &p.Revenue, &p.Discount, &p.NewCustomers); err != nil {
 				respondError(w, http.StatusInternalServerError, fmt.Sprintf("Scan error: %v", err))
 				return
 			}
@@ -87,10 +87,14 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	for i := range trendPoints {
+		trendPoints[i].NetRevenue = round2(trendPoints[i].Revenue - trendPoints[i].Discount)
+		trendPoints[i].Discount = round2(trendPoints[i].Discount)
+	}
+
 	respondJSON(w, http.StatusOK, models.TrendResponse{
 		TenantID: tenantID,
 		Interval: interval,
 		Data:     trendPoints,
 	})
 }
-

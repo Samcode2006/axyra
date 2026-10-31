@@ -45,25 +45,32 @@ func (h *Handler) MonitoringHandler(w http.ResponseWriter, r *http.Request) {
 
 	var stats MonitoringStats
 
+	// With a tenant named (always the case for customer admins) every figure is
+	// limited to it; without one the view is platform-wide, for operators.
+	var tenantArg interface{}
+	if t := h.explicitTenant(r); t != "" {
+		tenantArg = t
+	}
+
 	// Queue depth from Redis (best-effort; 0 on error or memory queue).
 	stats.QueueDepth = h.queueDepth(ctx)
 
 	// Ingestion rate from raw_events received timestamp.
 	_ = h.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM raw_events WHERE received_at >= $1`, ago60s).
+		`SELECT COUNT(*) FROM raw_events WHERE received_at >= $1 AND ($2::text IS NULL OR tenant_id = $2)`, ago60s, tenantArg).
 		Scan(&stats.EventsLast60s)
 	_ = h.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM raw_events WHERE received_at >= $1`, ago5m).
+		`SELECT COUNT(*) FROM raw_events WHERE received_at >= $1 AND ($2::text IS NULL OR tenant_id = $2)`, ago5m, tenantArg).
 		Scan(&stats.EventsLast5m)
 
 	// Processed events in last 5 minutes.
 	_ = h.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM processed_events WHERE processed_at >= $1 AND status = 'processed'`, ago5m).
+		`SELECT COUNT(*) FROM processed_events WHERE processed_at >= $1 AND status = 'processed' AND ($2::text IS NULL OR tenant_id = $2)`, ago5m, tenantArg).
 		Scan(&stats.ProcessedLast5m)
 
 	// Worker health: last processed_at across all watermarks.
 	var lastAt time.Time
-	err := h.db.QueryRowContext(ctx, `SELECT MAX(last_processed_at) FROM processing_watermarks`).Scan(&lastAt)
+	err := h.db.QueryRowContext(ctx, `SELECT MAX(last_processed_at) FROM processing_watermarks WHERE ($1::text IS NULL OR tenant_id = $1)`, tenantArg).Scan(&lastAt)
 	if err == nil && !lastAt.IsZero() {
 		stats.LastProcessedAt = &lastAt
 		stats.WorkerHealthy = lastAt.After(agoHealthy)
@@ -72,7 +79,7 @@ func (h *Handler) MonitoringHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dead-letter count.
-	_ = h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letter_events WHERE replayed_at IS NULL`).
+	_ = h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letter_events WHERE replayed_at IS NULL AND ($1::text IS NULL OR tenant_id = $1)`, tenantArg).
 		Scan(&stats.DeadLetterCount)
 
 	// Query latency percentiles from op_query_latency (last 5 minutes).
@@ -88,8 +95,8 @@ func (h *Handler) MonitoringHandler(w http.ResponseWriter, r *http.Request) {
 			PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms)::bigint,
 			COUNT(*)
 		FROM op_query_latency
-		WHERE recorded_at >= $1
-	`, ago5m).Scan(&lr.p50, &lr.p95, &lr.p99, &lr.count)
+		WHERE recorded_at >= $1 AND ($2::text IS NULL OR tenant_id = $2)
+	`, ago5m, tenantArg).Scan(&lr.p50, &lr.p95, &lr.p99, &lr.count)
 	if perr == nil {
 		stats.LatencyP50 = lr.p50
 		stats.LatencyP95 = lr.p95

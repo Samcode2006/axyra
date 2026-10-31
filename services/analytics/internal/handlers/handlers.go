@@ -37,8 +37,12 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 // If the limit is exceeded it writes 429 and returns ok=false.
 func (h *Handler) acquireQuery(w http.ResponseWriter, r *http.Request, tenantID, endpoint string) (done func(), ok bool) {
 	capacity := h.db.GetTenantMaxConcurrency(tenantID)
-	if err := h.limiter.Acquire(tenantID, capacity); err != nil {
-		respondError(w, http.StatusTooManyRequests, err.Error())
+	if err := h.limiter.Acquire(r.Context(), tenantID, capacity); err != nil {
+		// A client that disconnected while waiting is not "too many requests"; there
+		// is nobody to answer. Only a real timeout at the cap is a 429.
+		if r.Context().Err() == nil {
+			respondError(w, http.StatusTooManyRequests, err.Error())
+		}
 		return nil, false
 	}
 	start := time.Now()
@@ -102,4 +106,3 @@ func respondError(w http.ResponseWriter, status int, message string) {
 		},
 	})
 }
-

@@ -11,7 +11,7 @@ import argparse
 import random
 import uuid
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -32,16 +32,22 @@ PRODUCTS = [
 # store_001 gets ~70% of orders (skewed tenant distribution)
 STORE_WEIGHTS = [0.70, 0.30]
 CANCEL_RATE = 0.15
+HISTORY_DAYS = 60
+BATCH_SIZE = 50
+BATCH_DELAY_SECONDS = 5
 
 
 async def seed(count: int):
     async with httpx.AsyncClient(base_url=API_URL, timeout=30) as client:
         created = 0
         cancelled = 0
+        now = datetime.now(timezone.utc)
+        earliest = now - timedelta(days=HISTORY_DAYS)
         for i in range(count):
             store = random.choices(STORES, weights=STORE_WEIGHTS)[0]
             product = random.choice(PRODUCTS)
             amount = round(random.uniform(199, 9999), 2)
+            created_at = earliest + (now - earliest) * random.random()
 
             resp = await client.post("/orders", json={
                 "store_id": store,
@@ -50,6 +56,7 @@ async def seed(count: int):
                 "product_id": product["id"],
                 "product_name": product["name"],
                 "category": product["category"],
+                "created_at": created_at.isoformat(),
             })
             resp.raise_for_status()
             order = resp.json()
@@ -62,6 +69,8 @@ async def seed(count: int):
 
             if (i + 1) % 50 == 0:
                 print(f"  seeded {i + 1}/{count}...")
+            if (i + 1) % BATCH_SIZE == 0 and i + 1 < count:
+                await asyncio.sleep(BATCH_DELAY_SECONDS)
 
         print(f"\n✅ Done. Created {created} orders, cancelled {cancelled}.")
 

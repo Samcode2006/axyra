@@ -32,25 +32,24 @@ func (h *Handler) ListDeadLetterEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var query string
-	var args []interface{}
-
-	if agentFilter != "" {
-		query = `
-			SELECT id, agent_id, tenant_id, event_id, lsn, reason, payload, retry_count, replayed_at, created_at
-			FROM dead_letter_events
-			WHERE agent_id = $1
-			ORDER BY created_at DESC
-			LIMIT $2`
-		args = []interface{}{agentFilter, limit}
-	} else {
-		query = `
-			SELECT id, agent_id, tenant_id, event_id, lsn, reason, payload, retry_count, replayed_at, created_at
-			FROM dead_letter_events
-			ORDER BY created_at DESC
-			LIMIT $1`
-		args = []interface{}{limit}
+	// With a tenant named (always the case for customer admins) only that
+	// tenant's entries are returned; without one, all entries (operators).
+	var tenantArg interface{}
+	if t := h.explicitTenant(r); t != "" {
+		tenantArg = t
 	}
+
+	query := `
+		SELECT id, agent_id, tenant_id, event_id, lsn, reason, payload, retry_count, replayed_at, created_at
+		FROM dead_letter_events
+		WHERE ($1::text IS NULL OR agent_id = $1) AND ($2::text IS NULL OR tenant_id = $2)
+		ORDER BY created_at DESC
+		LIMIT $3`
+	var agentArg interface{}
+	if agentFilter != "" {
+		agentArg = agentFilter
+	}
+	args := []interface{}{agentArg, tenantArg, limit}
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {

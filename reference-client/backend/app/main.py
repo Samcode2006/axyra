@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import engine, Base
+from .migrations import upgrade_schema
 from .routers.orders import router as orders_router
 from .config import settings
 
@@ -12,6 +13,8 @@ async def lifespan(app: FastAPI):
     # Create tables on startup (for dev; prod uses Alembic migrations)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all never alters an existing table, so add any missing columns.
+        await upgrade_schema(conn)
     yield
 
 

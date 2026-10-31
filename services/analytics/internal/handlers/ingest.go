@@ -12,7 +12,10 @@ import (
 )
 
 // supportedSchemaVersions lists all event schema versions the data plane accepts.
-var supportedSchemaVersions = map[int]bool{1: true}
+// v1 carries the 7 base order fields; v2 adds the extended order fields (see
+// docs/schema-expansion-plan.md). Both stay accepted so agents can be upgraded
+// one at a time.
+var supportedSchemaVersions = map[int]bool{1: true, 2: true}
 
 // validateEvent checks that a raw event envelope has all required fields and an
 // accepted schema version. It returns a human-readable reason when invalid.
@@ -34,7 +37,7 @@ func validateEvent(e *models.EventEnvelope) string {
 		e.SchemaVersion = 1
 	}
 	if !supportedSchemaVersions[e.SchemaVersion] {
-		return fmt.Sprintf("unsupported schema_version %d; accepted: 1", e.SchemaVersion)
+		return fmt.Sprintf("unsupported schema_version %d; accepted: 1, 2", e.SchemaVersion)
 	}
 	return ""
 }

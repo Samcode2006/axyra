@@ -1,138 +1,186 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { StatCard } from '../../components/StatCard';
 import { Badge } from '../../components/Badge';
 import { Spinner, ErrorMsg } from '../../components/Feedback';
 import { analytics, tenants, agents, errMsg } from '../../lib/api';
-import { formatCurrency, formatNumber, relativeTime } from '../../lib/utils';
-import type { OrderSummary, AnalyticsStatus, Tenant, Agent } from '../../types';
+import { useLoadEffect } from '../../lib/useLoadEffect';
+import { formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
+import type { Agent, CustomerSummary, RevenueBreakdown, Tenant, TenantAlert, TenantHealth } from '../../types';
+
+/** The analytics API is per tenant, so organization-wide figures fan out. Capped to bound the request count. */
+const MAX_TENANTS = 12;
+
+interface TenantRow {
+  tenant: Tenant;
+  health?: TenantHealth;
+  revenue?: RevenueBreakdown;
+  customers?: CustomerSummary;
+}
+
+const ok = <T,>(r: PromiseSettledResult<{ data: T }>): T | undefined => (r.status === 'fulfilled' ? r.value.data : undefined);
 
 export default function OverviewPage() {
-  const [summary, setSummary] = useState<OrderSummary | null>(null);
-  const [status, setStatus] = useState<AnalyticsStatus | null>(null);
-  const [tenantList, setTenantList] = useState<Tenant[]>([]);
+  const [rows, setRows] = useState<TenantRow[]>([]);
+  const [tenantTotal, setTenantTotal] = useState(0);
   const [agentList, setAgentList] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const to = new Date().toISOString();
-    const from = new Date(Date.now() - 7 * 86_400_000).toISOString();
-    // Management data and analytics are independent: an organization with no
-    // tenants yet (or an analytics outage) must not hide the management data.
-    Promise.all([tenants.list(), agents.list()])
-      .then(([t, a]) => {
-        setTenantList(t.data.data ?? []);
-        setAgentList(a.data);
-      })
-      .catch((err) => setError(errMsg(err, 'Could not load overview data. Are the services running?')))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    try {
+      const [t, a] = await Promise.all([tenants.list({ per_page: 200 }), agents.list()]);
+      const all = t.data.data ?? [];
+      setTenantTotal(t.data.total);
+      setAgentList(a.data);
 
-    analytics.summary({ from, to }).then((s) => setSummary(s.data)).catch(() => setSummary(null));
-    analytics.status().then((s) => setStatus(s.data)).catch(() => setStatus(null));
+      const { from, to } = utcDayRange(7);
+      const shown = all.filter((x) => x.status === 'active').slice(0, MAX_TENANTS);
+      // allSettled: one tenant failing (or analytics being down) must not hide the rest.
+      const detail = await Promise.all(
+        shown.map(async (tenant): Promise<TenantRow> => {
+          const [h, r, c] = await Promise.allSettled([
+            analytics.tenantHealth({ tenant_id: tenant.id }),
+            analytics.revenue({ from, to, tenant_id: tenant.id }),
+            analytics.customerSummary({ from, to, tenant_id: tenant.id }),
+          ]);
+          return { tenant, health: ok(h), revenue: ok(r), customers: ok(c) };
+        })
+      );
+      // Tenants that are not active still belong in the health table.
+      const inactive = all.filter((x) => x.status !== 'active').map((tenant): TenantRow => ({ tenant }));
+      setRows([...detail, ...inactive]);
+      setError(null);
+    } catch (err) {
+      setError(errMsg(err, 'Could not load overview data. Are the services running?'));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useLoadEffect(load);
 
   if (loading) return <Spinner />;
   if (error) return <ErrorMsg message={error} />;
 
-  const activeTenants = tenantList.filter((t) => t.status === 'active').length;
+  const withData = rows.filter((r) => r.revenue);
+  const gross = withData.reduce((s, r) => s + (r.revenue?.gross_revenue ?? 0), 0);
+  const net = withData.reduce((s, r) => s + (r.revenue?.net_revenue ?? 0), 0);
+  const orders = withData.reduce((s, r) => s + (r.revenue?.active_orders ?? 0), 0);
+  const newCustomers = rows.reduce((s, r) => s + (r.customers?.new_customers ?? 0), 0);
+  const activeTenants = rows.filter((r) => r.tenant.status === 'active').length;
   const connectedAgents = agentList.filter((a) => a.status === 'connected').length;
+
+  const alerts: Array<TenantAlert & { tenantName: string }> = rows.flatMap((r) =>
+    (r.health?.alerts ?? []).map((a) => ({ ...a, tenantName: r.tenant.name }))
+  );
+  const top = [...rows]
+    .filter((r) => (r.health?.revenue_24h ?? 0) > 0)
+    .sort((a, b) => (b.health?.revenue_24h ?? 0) - (a.health?.revenue_24h ?? 0))[0];
+  const latest = rows
+    .map((r) => r.health?.last_event_at)
+    .filter((x): x is string => !!x)
+    .sort()
+    .pop();
+  const capped = tenantTotal > MAX_TENANTS;
 
   return (
     <div className="page">
       <div className="page-header">
         <h1>Overview</h1>
-        {status && (
-          <span className="freshness-badge">
-            🟢 Data as of {relativeTime(status.last_processed_at)}
-          </span>
-        )}
+        {latest && <span className="freshness-badge">Latest event {relativeTime(latest)}</span>}
       </div>
 
+      {alerts.length > 0 && (
+        <section aria-label="Active alerts">
+          {alerts.map((a) => (
+            <div key={`${a.tenantName}-${a.code}`} className={`alert-strip alert-strip--${a.severity}`} role="alert">
+              <strong>{a.tenantName}</strong>: {a.message}
+            </div>
+          ))}
+        </section>
+      )}
+
       <div className="stat-grid">
+        <StatCard label="Gross revenue (7d)" value={formatCurrency(gross)} accent="green" />
+        <StatCard label="Net revenue (7d)" value={formatCurrency(net)} accent="green" sub="after discounts" />
+        <StatCard label="Avg order value (7d)" value={orders > 0 ? formatCurrency(gross / orders) : '—'} accent="blue" sub={`${formatNumber(orders)} orders`} />
+        <StatCard label="New customers (7d)" value={formatNumber(newCustomers)} accent="blue" />
+        <StatCard label="Active tenants" value={activeTenants} sub={`${tenantTotal} total`} accent="blue" />
         <StatCard
-          label="Total Orders (7d)"
-          value={summary ? formatNumber(summary.total_orders) : '—'}
-          accent="blue"
-        />
-        <StatCard
-          label="Total Revenue (7d)"
-          value={summary ? formatCurrency(summary.total_revenue, summary.currency) : '—'}
-          accent="green"
-        />
-        <StatCard
-          label="Active Tenants"
-          value={activeTenants}
-          sub={`${tenantList.length} total`}
-          accent="blue"
-        />
-        <StatCard
-          label="Connected Agents"
+          label="Connected agents"
           value={connectedAgents}
           sub={`${agentList.length} total`}
           accent={connectedAgents > 0 ? 'green' : 'amber'}
         />
-        {status && (
-          <StatCard
-            label="Processing Lag"
-            value={`${status.lag_seconds}s`}
-            sub={`LSN: ${status.last_lsn}`}
-            accent={status.lag_seconds < 30 ? 'green' : 'amber'}
-          />
-        )}
       </div>
 
-      <div className="panel-grid">
+      {top && top.health && (
         <section className="panel">
-          <h2 className="panel-title">Tenants</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>External ID</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tenantList.slice(0, 5).map((t) => (
-                <tr key={t.id}>
-                  <td>{t.name}</td>
-                  <td className="mono">{t.external_tenant_id}</td>
-                  <td><Badge status={t.status} /></td>
-                </tr>
-              ))}
-              {tenantList.length === 0 && (
-                <tr><td colSpan={3} className="empty-cell">No tenants yet</td></tr>
-              )}
-            </tbody>
-          </table>
+          <h2 className="panel-title">Top tenant · last 24 hours</h2>
+          <p style={{ fontSize: 18, fontWeight: 600 }}>
+            {top.tenant.name}{' '}
+            <span className="hint">
+              {formatCurrency(top.health.revenue_24h)} from {formatNumber(top.health.orders_24h)} orders
+            </span>
+          </p>
         </section>
+      )}
 
-        <section className="panel">
-          <h2 className="panel-title">Agents</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Agent ID</th>
-                <th>Status</th>
-                <th>Last seen</th>
+      <section className="panel">
+        <h2 className="panel-title">Tenant health</h2>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Tenant</th>
+              <th>Plan</th>
+              <th>Last event</th>
+              <th>Age</th>
+              <th>Dead-letter</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ tenant, health }) => (
+              <tr key={tenant.id}>
+                <td>{tenant.name}<div className="mono">{tenant.external_tenant_id}</div></td>
+                <td>{tenant.plan_tier}</td>
+                <td>{health?.last_event_at ? relativeTime(health.last_event_at) : '—'}</td>
+                <td className="mono">{health?.lag_seconds != null ? `${Math.round(health.lag_seconds)}s` : '—'}</td>
+                <td>
+                  {health ? (
+                    <span className={health.dead_letter_count > 0 ? 'badge badge--red' : 'hint'}>{health.dead_letter_count}</span>
+                  ) : '—'}
+                </td>
+                <td>
+                  <Badge status={tenant.status} />
+                  {health && health.alerts.length > 0 && <span className="badge badge--amber" style={{ marginLeft: 6 }}>{health.alerts.length} alert{health.alerts.length > 1 ? 's' : ''}</span>}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {agentList.slice(0, 5).map((a) => (
-                <tr key={a.id}>
-                  <td className="mono">{a.id}</td>
-                  <td><Badge status={a.status} /></td>
-                  <td>{a.last_seen_at ? relativeTime(a.last_seen_at) : '—'}</td>
-                </tr>
-              ))}
-              {agentList.length === 0 && (
-                <tr><td colSpan={3} className="empty-cell">No agents registered</td></tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-      </div>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={6} className="empty-cell">No tenants yet</td></tr>}
+          </tbody>
+        </table>
+        {capped && <p className="hint">Showing figures for the first {MAX_TENANTS} active tenants of {tenantTotal}.</p>}
+      </section>
+
+      <section className="panel">
+        <h2 className="panel-title">Agents</h2>
+        <table className="table">
+          <thead>
+            <tr><th>Agent</th><th>Status</th><th>Last seen</th></tr>
+          </thead>
+          <tbody>
+            {agentList.slice(0, 5).map((a) => (
+              <tr key={a.id}>
+                <td>{a.name}<div className="mono">{a.id}</div></td>
+                <td><Badge status={a.status} /></td>
+                <td>{a.last_seen_at ? relativeTime(a.last_seen_at) : '—'}</td>
+              </tr>
+            ))}
+            {agentList.length === 0 && <tr><td colSpan={3} className="empty-cell">No agents registered</td></tr>}
+          </tbody>
+        </table>
+      </section>
     </div>
   );
 }
-

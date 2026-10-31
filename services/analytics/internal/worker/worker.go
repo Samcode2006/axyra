@@ -2,13 +2,13 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"time"
 
+	"github.com/axyra/analytics/internal/aggregate"
 	"github.com/axyra/analytics/internal/db"
 	"github.com/axyra/analytics/internal/models"
 	"github.com/axyra/analytics/internal/queue"
@@ -148,139 +148,10 @@ func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) erro
 		return fmt.Errorf("insert raw event: %w", err)
 	}
 
-	// 4. Extract order fields
-	orderID := getString(e.Data, "order_id", getString(e.Data, "id", ""))
-	if orderID != "" {
-		amount := getFloat(e.Data, "amount", 0.0)
-		currency := getString(e.Data, "currency", "INR")
-		status := getString(e.Data, "status", "placed")
-		productID := getString(e.Data, "product_id", "")
-		productName := getString(e.Data, "product_name", "Unknown Product")
-		category := getString(e.Data, "category", "General")
-
-		// Check prior order state
-		var priorStatus string
-		var priorAmount float64
-		var exists bool
-
-		err = tx.QueryRowContext(ctx, `
-			SELECT status, amount 
-			FROM order_state 
-			WHERE tenant_id = $1 AND order_id = $2
-		`, e.TenantID, orderID).Scan(&priorStatus, &priorAmount)
-		if err == nil {
-			exists = true
-		} else if err != sql.ErrNoRows {
-			return fmt.Errorf("query prior order state: %w", err)
-		}
-
-		var deltaTotalOrders int64
-		var deltaActiveOrders int64
-		var deltaCancelledOrders int64
-		var deltaRevenue float64
-
-		if !exists {
-			deltaTotalOrders = 1
-			if status == "cancelled" {
-				deltaCancelledOrders = 1
-				deltaActiveOrders = 0
-				deltaRevenue = 0
-			} else {
-				deltaActiveOrders = 1
-				deltaCancelledOrders = 0
-				deltaRevenue = amount
-			}
-		} else {
-			deltaTotalOrders = 0 // already counted in total
-			if priorStatus != "cancelled" && status == "cancelled" {
-				// Transition to cancelled: revert revenue and active count
-				deltaActiveOrders = -1
-				deltaCancelledOrders = 1
-				deltaRevenue = -priorAmount
-			} else if priorStatus == "cancelled" && status != "cancelled" {
-				// Re-activated
-				deltaActiveOrders = 1
-				deltaCancelledOrders = -1
-				deltaRevenue = amount
-			} else if priorStatus != "cancelled" && status != "cancelled" {
-				// Update on active order (e.g. price change)
-				deltaActiveOrders = 0
-				deltaCancelledOrders = 0
-				deltaRevenue = amount - priorAmount
-			}
-		}
-
-		// Upsert order_state
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO order_state (order_id, tenant_id, amount, currency, status, product_id, product_name, category, occurred_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-			ON CONFLICT (tenant_id, order_id) DO UPDATE SET
-				amount = EXCLUDED.amount,
-				currency = EXCLUDED.currency,
-				status = EXCLUDED.status,
-				product_id = EXCLUDED.product_id,
-				product_name = EXCLUDED.product_name,
-				category = EXCLUDED.category,
-				updated_at = NOW();
-		`, orderID, e.TenantID, amount, currency, status, productID, productName, category, occurredAt)
-		if err != nil {
-			return fmt.Errorf("upsert order state: %w", err)
-		}
-
-		// Upsert order_summary_hourly
-		hourlyBucket := occurredAt.Truncate(time.Hour)
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO order_summary_hourly (tenant_id, bucket, total_orders, active_orders, cancelled_orders, total_revenue, currency)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (tenant_id, bucket) DO UPDATE SET
-				total_orders = order_summary_hourly.total_orders + EXCLUDED.total_orders,
-				active_orders = order_summary_hourly.active_orders + EXCLUDED.active_orders,
-				cancelled_orders = order_summary_hourly.cancelled_orders + EXCLUDED.cancelled_orders,
-				total_revenue = order_summary_hourly.total_revenue + EXCLUDED.total_revenue;
-		`, e.TenantID, hourlyBucket, deltaTotalOrders, deltaActiveOrders, deltaCancelledOrders, deltaRevenue, currency)
-		if err != nil {
-			return fmt.Errorf("upsert order summary hourly: %w", err)
-		}
-
-		// Upsert order_summary_daily
-		dailyBucket := occurredAt.Format("2006-01-02")
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO order_summary_daily (tenant_id, bucket, total_orders, active_orders, cancelled_orders, total_revenue, currency)
-			VALUES ($1, $2::date, $3, $4, $5, $6, $7)
-			ON CONFLICT (tenant_id, bucket) DO UPDATE SET
-				total_orders = order_summary_daily.total_orders + EXCLUDED.total_orders,
-				active_orders = order_summary_daily.active_orders + EXCLUDED.active_orders,
-				cancelled_orders = order_summary_daily.cancelled_orders + EXCLUDED.cancelled_orders,
-				total_revenue = order_summary_daily.total_revenue + EXCLUDED.total_revenue;
-		`, e.TenantID, dailyBucket, deltaTotalOrders, deltaActiveOrders, deltaCancelledOrders, deltaRevenue, currency)
-		if err != nil {
-			return fmt.Errorf("upsert order summary daily: %w", err)
-		}
-
-		// Upsert product_aggregates (only if productID is present)
-		if productID != "" {
-			var deltaProductOrder int64 = 0
-			if !exists && status != "cancelled" {
-				deltaProductOrder = 1
-			} else if exists && priorStatus == "cancelled" && status != "cancelled" {
-				deltaProductOrder = 1
-			} else if exists && priorStatus != "cancelled" && status == "cancelled" {
-				deltaProductOrder = -1
-			}
-
-			_, err = tx.ExecContext(ctx, `
-				INSERT INTO product_aggregates (tenant_id, product_id, product_name, category, order_count, total_revenue)
-				VALUES ($1, $2, $3, $4, $5, $6)
-				ON CONFLICT (tenant_id, product_id) DO UPDATE SET
-					order_count = product_aggregates.order_count + EXCLUDED.order_count,
-					total_revenue = product_aggregates.total_revenue + EXCLUDED.total_revenue,
-					product_name = EXCLUDED.product_name,
-					category = EXCLUDED.category;
-			`, e.TenantID, productID, productName, category, deltaProductOrder, deltaRevenue)
-			if err != nil {
-				return fmt.Errorf("upsert product aggregates: %w", err)
-			}
-		}
+	// 4. Apply the order to order_state and every aggregate table. The rebuild
+	// handler calls the same function, so both paths produce identical results.
+	if err := aggregate.ProcessOrderEvent(ctx, tx, e.TenantID, occurredAt, e.Data, e.SchemaVersion); err != nil {
+		return err
 	}
 
 	// 5. Upsert processing_watermarks
@@ -307,7 +178,17 @@ func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) erro
 		return fmt.Errorf("insert processed_events: %w", err)
 	}
 
-	// 7. Touch agent status
+	// 7. Count this event toward the per-minute throughput shown on the monitoring
+	// page. Done in the same transaction, so it only counts committed events.
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO op_ingestion_rate (bucket, event_count)
+		VALUES (DATE_TRUNC('minute', NOW()), 1)
+		ON CONFLICT (bucket) DO UPDATE SET event_count = op_ingestion_rate.event_count + 1
+	`); err != nil {
+		return fmt.Errorf("record ingestion rate: %w", err)
+	}
+
+	// 8. Touch agent status
 	_, _ = tx.ExecContext(ctx, `
 		UPDATE agents 
 		SET status = 'connected', last_seen_at = NOW() 
@@ -318,7 +199,7 @@ func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) erro
 		return fmt.Errorf("commit tx: %w", err)
 	}
 
-	// 8. Advance the confirmed LSN cursor so the agent can restart safely.
+	// 9. Advance the confirmed LSN cursor so the agent can restart safely.
 	// This is done outside the transaction: if it fails, the worst case is
 	// the agent re-delivers already-processed events, which idempotency handles.
 	if e.LSN != "" {

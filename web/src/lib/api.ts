@@ -5,7 +5,22 @@ import type {
   AnalyticsStatus,
   Application,
   AuditLogPage,
+  BreakdownGroup,
   BreakdownResponse,
+  ChannelItem,
+  CohortPoint,
+  CustomerSummary,
+  DiscountSummary,
+  FunnelStage,
+  GeoGroup,
+  GeoItem,
+  IngestionPoint,
+  MonitoringDetail,
+  PaymentItem,
+  ReturnsSummary,
+  RevenueBreakdown,
+  TenantHealth,
+  TopBuyer,
   DeadLetterEvent,
   IssuedToken,
   MetricConfig,
@@ -156,10 +171,22 @@ export const tenants = {
     name: string;
     organization_id?: string;
     quota?: Partial<TenantQuota>;
+    region?: Tenant['region'];
+    plan_tier?: Tenant['plan_tier'];
+    billing_cycle?: Tenant['billing_cycle'];
+    tags?: string[];
   }) => http.post<Tenant>('/v1/tenants', payload),
   update: (
     id: string,
-    payload: { name?: string; status?: Tenant['status']; quota?: Partial<TenantQuota> }
+    payload: {
+      name?: string;
+      status?: Tenant['status'];
+      quota?: Partial<TenantQuota>;
+      region?: Tenant['region'];
+      plan_tier?: Tenant['plan_tier'];
+      billing_cycle?: Tenant['billing_cycle'];
+      tags?: string[];
+    }
   ) => http.patch<Tenant>(`/v1/tenants/${id}`, payload),
   remove: (id: string) => http.delete(`/v1/tenants/${id}`),
 };
@@ -167,17 +194,47 @@ export const tenants = {
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
 export const analytics = {
-  summary: (params: { from: string; to: string }) =>
+  summary: (params: { from: string; to: string; tenant_id?: string }) =>
     http.get<OrderSummary>('/v1/analytics/orders/summary', { params }),
 
-  trend: (params: { interval: 'hour' | 'day'; from: string; to: string }) =>
+  trend: (params: { interval: 'hour' | 'day'; from: string; to: string; tenant_id?: string }) =>
     http.get<TrendResponse>('/v1/analytics/orders/trend', { params }),
 
-  topProducts: (params: { limit?: number; from: string; to: string }) =>
-    http.get<TopProductsResponse>('/v1/analytics/products/top', { params }),
+  topProducts: (params: {
+    limit?: number;
+    from: string;
+    to: string;
+    sort_by?: 'revenue' | 'quantity' | 'returns';
+    tenant_id?: string;
+  }) => http.get<TopProductsResponse>('/v1/analytics/products/top', { params }),
 
-  breakdown: (params: { group_by: 'status' | 'category'; from: string; to: string }) =>
+  breakdown: (params: { group_by: BreakdownGroup; from: string; to: string; tenant_id?: string }) =>
     http.get<BreakdownResponse>('/v1/analytics/orders/breakdown', { params }),
+
+  // Schema expansion endpoints. Every one is tenant-scoped by the control plane
+  // for customer admins; operators may pass tenant_id.
+  revenue: (params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<RevenueBreakdown>('/v1/analytics/orders/revenue', { params }),
+  customerSummary: (params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<CustomerSummary>('/v1/analytics/customers/summary', { params }),
+  topBuyers: (params: { limit?: number; from?: string; to?: string; tenant_id?: string }) =>
+    http.get<{ tenant_id: string; data: TopBuyer[] }>('/v1/analytics/customers/top', { params }),
+  cohorts: (params: { from: string; to: string; interval: 'day' | 'week'; tenant_id?: string }) =>
+    http.get<{ tenant_id: string; interval: string; data: CohortPoint[] }>('/v1/analytics/customers/cohorts', { params }),
+  geo: (params: { from: string; to: string; group_by: GeoGroup; limit?: number; tenant_id?: string }) =>
+    http.get<{ tenant_id: string; group_by: string; data: GeoItem[] }>('/v1/analytics/geo/breakdown', { params }),
+  channels: (params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<{ tenant_id: string; data: ChannelItem[] }>('/v1/analytics/channels/breakdown', { params }),
+  payments: (params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<{ tenant_id: string; data: PaymentItem[] }>('/v1/analytics/payments/breakdown', { params }),
+  returns: (params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<ReturnsSummary>('/v1/analytics/returns/summary', { params }),
+  funnel: (params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<{ tenant_id: string; data: FunnelStage[] }>('/v1/analytics/fulfillment/funnel', { params }),
+  discounts: (params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<DiscountSummary>('/v1/analytics/discounts/summary', { params }),
+  tenantHealth: (params: { tenant_id: string }) =>
+    http.get<TenantHealth>('/v1/analytics/tenant/health', { params }),
 
   status: (params?: { tenant_id?: string }) =>
     http.get<AnalyticsStatus>('/v1/analytics/status', { params }),
@@ -187,6 +244,10 @@ export const analytics = {
 
   monitoring: () =>
     http.get<MonitoringStats>('/v1/analytics/monitoring'),
+  monitoringDetail: () =>
+    http.get<MonitoringDetail>('/v1/analytics/monitoring/detail'),
+  ingestionRate: () =>
+    http.get<{ data: IngestionPoint[]; total_last_hour: number }>('/v1/analytics/monitoring/ingestion-rate'),
 
   rebuild: (params?: { tenant_id?: string }) =>
     http.post<{ tenant_id: string; events_replayed: number; duration_ms: number }>(

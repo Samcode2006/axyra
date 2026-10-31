@@ -48,7 +48,37 @@ func Load(path string) (*Config, error) {
 				TenantIDColumn:  "store_id",
 				PKColumn:        "id",
 				EventTypeColumn: "status",
-				Columns:         []string{"id", "store_id", "amount", "currency", "status", "product_id", "product_name", "category", "created_at", "updated_at"},
+				// 27 columns: the 8 base order columns, 17 extended ones (schema v2) and the
+				// two timestamps. customer_email is never sent to the platform.
+				Columns: []string{
+					"id",
+					"store_id",
+					"amount",
+					"currency",
+					"status",
+					"product_id",
+					"product_name",
+					"category",
+					"customer_id",
+					"customer_tier",
+					"payment_method",
+					"payment_status",
+					"discount_code",
+					"discount_amount",
+					"tax_amount",
+					"shipping_cost",
+					"quantity",
+					"sku",
+					"fulfillment_status",
+					"return_reason",
+					"country",
+					"state_province",
+					"city",
+					"channel",
+					"referrer_source",
+					"created_at",
+					"updated_at",
+				},
 			},
 		},
 	}
@@ -106,4 +136,3 @@ func expandEnvVars(s string) string {
 		return match
 	})
 }
-

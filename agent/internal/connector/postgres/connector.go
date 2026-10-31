@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,11 +24,11 @@ type PostgresConnector struct {
 	// startLSN is the LSN to resume replication from. When empty the connector
 	// starts from the current WAL tip (first run). On subsequent runs the agent
 	// populates this from the last confirmed_lsn returned by GET /v1/agent/ack.
-	startLSN        string
-	conn            *pgconn.PgConn
-	relations       map[uint32]*pglogrepl.RelationMessage
-	mu              sync.Mutex
-	closed          bool
+	startLSN  string
+	conn      *pgconn.PgConn
+	relations map[uint32]*pglogrepl.RelationMessage
+	mu        sync.Mutex
+	closed    bool
 }
 
 func New(dsn, slotName, publicationName string, tables []string) *PostgresConnector {
@@ -362,29 +363,52 @@ func decodeTuple(rel *pglogrepl.RelationMessage, tuple *pglogrepl.TupleData) map
 		if idx >= len(rel.Columns) {
 			break
 		}
-		colName := rel.Columns[idx].Name
+		rc := rel.Columns[idx]
 		switch col.DataType {
 		case 'n': // null
-			row[colName] = nil
+			row[rc.Name] = nil
 		case 't': // text
-			textVal := string(col.Data)
-			row[colName] = parseColumnValue(textVal)
+			row[rc.Name] = decodeValue(rc.DataType, string(col.Data))
+		case 'u':
+			// An unchanged TOASTed value: its contents are not in the stream.
+			// Leave the key out so downstream sees "not provided", not "empty".
 		default:
-			row[colName] = string(col.Data)
+			row[rc.Name] = string(col.Data)
 		}
 	}
 	return row
 }
 
-func parseColumnValue(s string) interface{} {
-	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return i
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		return f
-	}
-	if b, err := strconv.ParseBool(s); err == nil {
-		return b
+// PostgreSQL type OIDs (pg_type.oid) that decode to a non-string JSON value.
+const (
+	oidBool    = 16
+	oidInt8    = 20
+	oidInt2    = 21
+	oidInt4    = 23
+	oidOID     = 26
+	oidFloat4  = 700
+	oidFloat8  = 701
+	oidNumeric = 1700
+)
+
+// decodeValue converts a column's text representation using the column's
+// declared type. Only booleans, integers and decimals become JSON numbers or
+// booleans; everything else, including text columns that merely look numeric,
+// stays a string. Guessing from the text instead would turn a SKU of "007" into
+// the number 7, "1e5" into 100000 and "t" into true.
+func decodeValue(typeOID uint32, s string) interface{} {
+	switch typeOID {
+	case oidBool:
+		return s == "t" || s == "true"
+	case oidInt2, oidInt4, oidInt8, oidOID:
+		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return i
+		}
+	case oidFloat4, oidFloat8, oidNumeric:
+		// NaN and Infinity cannot be encoded in JSON, so they stay text.
+		if f, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+			return f
+		}
 	}
 	return s
 }

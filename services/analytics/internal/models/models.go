@@ -41,6 +41,11 @@ type TrendPoint struct {
 	Bucket     time.Time `json:"bucket"`
 	OrderCount int64     `json:"order_count"`
 	Revenue    float64   `json:"revenue"`
+	// Extended series, from the same summary row. They are 0 for orders that
+	// predate schema v2, which carry no discount or customer information.
+	Discount     float64 `json:"discount"`
+	NetRevenue   float64 `json:"net_revenue"`
+	NewCustomers int64   `json:"new_customers"`
 }
 
 type TrendResponse struct {
@@ -50,11 +55,20 @@ type TrendResponse struct {
 }
 
 type TopProduct struct {
-	ProductID   string  `json:"product_id"`
-	ProductName string  `json:"product_name"`
-	Category    string  `json:"category"`
-	OrderCount  int64   `json:"order_count"`
-	Revenue     float64 `json:"revenue"`
+	ProductID   string `json:"product_id"`
+	ProductName string `json:"product_name"`
+	Category    string `json:"category"`
+	// OrderCount counts non-cancelled orders.
+	OrderCount int64 `json:"order_count"`
+	// Revenue is kept for existing clients; TotalRevenue carries the same value
+	// under the name used by the schema expansion plan.
+	Revenue       float64 `json:"revenue"`
+	TotalRevenue  float64 `json:"total_revenue"`
+	QuantitySold  int64   `json:"quantity_sold"`
+	TotalDiscount float64 `json:"total_discount"`
+	ReturnCount   int64   `json:"return_count"`
+	ReturnRatePct float64 `json:"return_rate_pct"`
+	AvgUnitPrice  float64 `json:"avg_unit_price"`
 }
 
 type TopProductsResponse struct {
@@ -81,4 +95,3 @@ type AnalyticsStatus struct {
 	LagSeconds      float64   `json:"lag_seconds"`
 	IsHealthy       bool      `json:"is_healthy"`
 }
-

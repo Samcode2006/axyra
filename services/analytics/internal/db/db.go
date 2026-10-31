@@ -4,18 +4,24 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	_ "embed"
+	"embed"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 )
 
-//go:embed 001_init.sql
-var initMigration string
+//go:embed *.sql
+var migrationFiles embed.FS
+
+// migrationLockKey serializes concurrent analytics replicas starting together.
+// It differs from the control plane's key because both services share one database.
+const migrationLockKey = 7243002
 
 type DB struct {
 	*sql.DB
@@ -63,11 +69,72 @@ func Connect(dsn string) (*DB, error) {
 	return db, nil
 }
 
+// Migrate applies every embedded NNN_*.sql file that has not been applied yet,
+// in version order. Each file runs in its own transaction and is recorded in
+// analytics_schema_migrations, so a file is never executed twice.
+//
+// The tracking table is named differently from the control plane's
+// schema_migrations because both services share one database and both ship a
+// file called 001_init.sql.
 func (db *DB) Migrate() error {
-	if _, err := db.Exec(initMigration); err != nil {
-		return fmt.Errorf("exec migration: %w", err)
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS analytics_schema_migrations (
+			version TEXT PRIMARY KEY,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`); err != nil {
+		return fmt.Errorf("create analytics_schema_migrations: %w", err)
+	}
+
+	names, err := fs.Glob(migrationFiles, "*.sql")
+	if err != nil {
+		return err
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if err := db.applyMigration(name); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
 	}
 	log.Println("[analytics-db] migrations applied successfully")
+	return nil
+}
+
+func (db *DB) applyMigration(name string) error {
+	body, err := migrationFiles.ReadFile(name)
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("SELECT pg_advisory_xact_lock($1)", migrationLockKey); err != nil {
+		return err
+	}
+
+	var applied bool
+	if err := tx.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM analytics_schema_migrations WHERE version = $1)", name).Scan(&applied); err != nil {
+		return err
+	}
+	if applied {
+		return nil
+	}
+
+	if _, err := tx.Exec(string(body)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("INSERT INTO analytics_schema_migrations (version) VALUES ($1)", name); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("[analytics-db] applied migration %s", name)
 	return nil
 }
 

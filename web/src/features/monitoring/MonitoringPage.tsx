@@ -4,6 +4,7 @@ import { analytics, errMsg } from '../../lib/api';
 import { useLoadEffect } from '../../lib/useLoadEffect';
 import { ErrorMsg, Spinner } from '../../components/Feedback';
 import { StatCard } from '../../components/StatCard';
+import MonitoringDetailPanels from './MonitoringDetailPanels';
 import { relativeTime } from '../../lib/utils';
 import type { DeadLetterEvent, MonitoringStats } from '../../types';
 
@@ -14,6 +15,8 @@ export default function MonitoringPage() {
   const [error, setError] = useState<string | null>(null);
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
   const [rebuildLoading, setRebuildLoading] = useState(false);
+  // Bumped by Refresh so the independently-loaded detail panels reload with the rest.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -60,7 +63,7 @@ export default function MonitoringPage() {
       <div className="page-header">
         <h1>Monitoring</h1>
         <div className="row-actions">
-          <button className="btn btn--sm" onClick={() => { setLoading(true); void load(); }}>
+          <button className="btn btn--sm" onClick={() => { setLoading(true); setRefreshKey((k) => k + 1); void load(); }}>
             ↻ Refresh
           </button>
           <button
@@ -193,6 +196,9 @@ export default function MonitoringPage() {
           </div>
         </div>
       </section>
+
+      {/* Throughput, event types, schema versions, agent lag, failures by tenant */}
+      <MonitoringDetailPanels refreshKey={refreshKey} />
 
       {/* B-5: Failed / dead-letter events */}
       <section className="panel">
