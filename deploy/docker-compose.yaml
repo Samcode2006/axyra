@@ -1,0 +1,157 @@
+services:
+
+  # ─── Reference Client ────────────────────────────────────────────────────────
+
+  reference-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: reference_db
+    command: >
+      postgres
+        -c wal_level=logical
+        -c max_replication_slots=4
+        -c max_wal_senders=4
+    volumes:
+      - reference_db_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  reference-backend:
+    build:
+      context: ../reference-client/backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@reference-db:5432/reference_db
+      AXYRA_CONSOLE_URL: http://localhost:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      reference-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Axyra Agent (runs alongside reference-db, reads WAL) ────────────────────
+
+  axyra-agent:
+    image: axyra-agent:latest   # built from agent/Dockerfile by Developer A
+    restart: unless-stopped
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@reference-db:5432/reference_db
+      AXYRA_ENDPOINT: http://analytics:8082
+      AXYRA_AGENT_TOKEN: ${AXYRA_AGENT_TOKEN}
+      REPLICATION_SLOT: axyra_slot
+    depends_on:
+      reference-db:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    volumes:
+      - ../configs/agent-example.yaml:/etc/axyra/agent.yaml:ro
+
+  # ─── Axyra Platform ──────────────────────────────────────────────────────────
+
+  platform-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: axyra_platform
+    volumes:
+      - platform_db_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  control-plane:
+    image: axyra-control-plane:latest   # built from services/control-plane/ by Developer A
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 8081
+    ports:
+      - "8081:8081"
+    depends_on:
+      platform-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  analytics:
+    image: axyra-analytics:latest   # built from services/analytics/ by Developer A
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform
+      REDIS_URL: redis://redis:6379
+      CONTROL_PLANE_URL: http://control-plane:8081
+      PORT: 8082
+    ports:
+      - "8082:8082"
+    depends_on:
+      platform-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      control-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Axyra Web Console ───────────────────────────────────────────────────────
+
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:8081
+    ports:
+      - "5173:80"
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+
+volumes:
+  reference_db_data:
+  platform_db_data:
+
