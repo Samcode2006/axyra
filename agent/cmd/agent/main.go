@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -63,19 +64,15 @@ func main() {
 		}
 	}()
 
-	// 2. Fetch confirmed LSN from the data plane ack endpoint (restart safety).
-	// On first run this returns "0/0" and we start from the WAL tip.
-	confirmedLSN := fetchConfirmedLSN(cfg)
-
-	// 3. Initialize sender and mapper
+	// 2. Initialize sender and mapper
 	snd := sender.New(cfg)
 	snd.Start(ctx)
 
 	m := mapper.New(cfg)
 
-	changeEvents := make(chan connector.ChangeEvent, 500)
+	changeEvents := make(chan connector.ChangeEvent, 1000)
 
-	// Pipe changeEvents -> mapper -> sender
+	// 3. Pipe changeEvents -> mapper -> sender
 	go func() {
 		for {
 			select {
@@ -95,40 +92,94 @@ func main() {
 		}
 	}()
 
-	// 4. Select and start connector
-	var conn connector.Connector
+	// 4. Select connector mode
 	mode := os.Getenv("CONNECTOR_MODE")
 	if mode == "webhook" {
+		// Single webhook connector (no multi-source in webhook mode)
 		log.Println("[axyra-agent] using Webhook fallback connector")
-		conn = webhook.New("8084")
-	} else {
-		log.Println("[axyra-agent] using PostgreSQL WAL logical replication connector")
-		tableNames := make([]string, len(cfg.Tables))
-		for i, t := range cfg.Tables {
-			tableNames[i] = t.Name
-		}
-		pgConn := postgres.New(cfg.PostgresDSN, cfg.ReplicationSlot, cfg.PublicationName, tableNames)
-		pgConn.WithStartLSN(confirmedLSN)
-		conn = pgConn
+		conn := webhook.New("8084")
+		go func() {
+			if err := conn.Start(ctx, changeEvents); err != nil && err != context.Canceled {
+				log.Printf("[axyra-agent] webhook connector exited with error: %v", err)
+			}
+		}()
+
+		// Graceful shutdown
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		<-quit
+		log.Println("[axyra-agent] shutting down...")
+		cancel()
+		_ = conn.Close()
+		_ = snd.Close()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer shutdownCancel()
+		_ = healthServer.Shutdown(shutdownCtx)
+		log.Println("[axyra-agent] shutdown complete")
+		return
 	}
 
-	go func() {
-		if err := conn.Start(ctx, changeEvents); err != nil && err != context.Canceled {
-			log.Printf("[axyra-agent] connector exited with error: %v", err)
-		}
-	}()
+	// 5. Multi-source PostgreSQL WAL connectors
+	sources := cfg.EffectiveSources()
+	log.Printf("[axyra-agent] starting with %d tenant source(s)", len(sources))
 
-	// 5. Graceful shutdown
+	tableNames := make([]string, len(cfg.Tables))
+	for i, t := range cfg.Tables {
+		tableNames[i] = t.Name
+	}
+
+	var (
+		connectors []connector.Connector
+		wg         sync.WaitGroup
+	)
+
+	for _, src := range sources {
+		src := src // capture loop variable
+
+		// Per-source LSN cursor: fetch from analytics keyed by agent+source
+		confirmedLSN := fetchConfirmedLSN(cfg, src.Name)
+
+		pgConn := postgres.New(src.PostgresDSN, src.ReplicationSlot, src.PublicationName, tableNames)
+		pgConn.WithStartLSN(confirmedLSN)
+		connectors = append(connectors, pgConn)
+
+		log.Printf("[axyra-agent] connecting source %q (tenant=%q, slot=%s)",
+			src.Name, src.ExternalTenantID, src.ReplicationSlot)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Wrap the shared channel with a source-annotating shim
+			annotated := make(chan connector.ChangeEvent, 200)
+			go func() {
+				for ce := range annotated {
+					ce.SourceName = src.Name
+					ce.OverrideTenantID = src.ExternalTenantID
+					changeEvents <- ce
+				}
+			}()
+			if err := pgConn.Start(ctx, annotated); err != nil && err != context.Canceled {
+				log.Printf("[axyra-agent] source %q connector exited with error: %v", src.Name, err)
+			}
+			close(annotated)
+		}()
+	}
+
+	// 6. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Println("[axyra-agent] shutting down...")
 	cancel()
-	_ = conn.Close()
+	wg.Wait()
+
+	for _, c := range connectors {
+		_ = c.Close()
+	}
 	_ = snd.Close()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = healthServer.Shutdown(shutdownCtx)
 
@@ -136,9 +187,11 @@ func main() {
 }
 
 // fetchConfirmedLSN polls the analytics data plane ack endpoint and returns the
-// last confirmed LSN for this agent. On any failure it returns "" so the
-// connector starts from the current WAL tip (safe: idempotency handles re-delivery).
-func fetchConfirmedLSN(cfg *config.Config) string {
+// last confirmed LSN for this agent+source combination. On any failure it returns
+// "" so the connector starts from the current WAL tip (safe: idempotency handles
+// re-delivery). sourceName is appended to the agent_id to distinguish per-source
+// cursors when multiple tenant databases are in play.
+func fetchConfirmedLSN(cfg *config.Config, sourceName string) string {
 	url := fmt.Sprintf("%s/v1/agent/ack", cfg.AxyraEndpoint)
 	client := &http.Client{Timeout: 5 * time.Second}
 
@@ -148,16 +201,22 @@ func fetchConfirmedLSN(cfg *config.Config) string {
 		return ""
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cfg.AgentToken))
+	// Tell the platform which source we're asking about
+	if sourceName != "" && sourceName != "default" {
+		q := req.URL.Query()
+		q.Set("source", sourceName)
+		req.URL.RawQuery = q.Encode()
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("[axyra-agent] ack endpoint unreachable, starting from WAL tip: %v", err)
+		log.Printf("[axyra-agent] ack endpoint unreachable for source %q, starting from WAL tip: %v", sourceName, err)
 		return ""
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("[axyra-agent] ack endpoint returned %d, starting from WAL tip", resp.StatusCode)
+		log.Printf("[axyra-agent] ack endpoint returned %d for source %q, starting from WAL tip", resp.StatusCode, sourceName)
 		return ""
 	}
 
@@ -174,7 +233,7 @@ func fetchConfirmedLSN(cfg *config.Config) string {
 	}
 
 	if ack.ConfirmedLSN != "" && ack.ConfirmedLSN != "0/0" {
-		log.Printf("[axyra-agent] resuming from confirmed LSN: %s", ack.ConfirmedLSN)
+		log.Printf("[axyra-agent] source %q resuming from confirmed LSN: %s", sourceName, ack.ConfirmedLSN)
 	}
 	return ack.ConfirmedLSN
 }

@@ -1,0 +1,50 @@
+# Axyra Agent Configuration — Database-per-Tenant (Silo) Mode
+# Each source block is a dedicated tenant PostgreSQL database.
+# The agent spawns one WAL replication goroutine per source.
+#
+# To scale dynamically without editing YAML, set TENANT_COUNT=N in .env
+# and the agent will auto-generate sources for reference-db-1 through reference-db-N.
+
+axyra_endpoint: "${AXYRA_ENDPOINT}"
+agent_token: "${AXYRA_AGENT_TOKEN}"
+agent_id: "agent_ref_demo"
+batch_size: 10
+flush_interval: 200ms
+health_port: "8083"
+
+tables:
+  - name: orders
+    tenant_id_column: store_id
+    pk_column: id
+    event_type_column: status
+    columns:
+      - id
+      - store_id
+      - amount
+      - currency
+      - status
+      - product_id
+      - product_name
+      - category
+      - customer_id
+      - customer_tier
+      - payment_method
+      - payment_status
+      - discount_code
+      - discount_amount
+      - tax_amount
+      - shipping_cost
+      - quantity
+      - sku
+      - fulfillment_status
+      - return_reason
+      - country
+      - state_province
+      - city
+      - channel
+      - referrer_source
+      - created_at
+      - updated_at
+
+# Sources are auto-generated from TENANT_COUNT by the agent. Keeping this list
+# empty is intentional: it lets Compose scale the silo count without editing YAML.

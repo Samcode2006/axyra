@@ -29,6 +29,7 @@ func main() {
 
 	if err := db.SeedDefaultData(database, db.SeedOptions{
 		AgentToken:       cfg.DefaultAgentToken,
+		TenantCount:      cfg.TenantCount,
 		AdminUsername:    cfg.AdminUsername,
 		AdminPassword:    cfg.AdminPassword,
 		OperatorUsername: cfg.OperatorUsername,
