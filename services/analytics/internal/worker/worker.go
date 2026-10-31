@@ -14,6 +14,16 @@ import (
 	"github.com/axyra/analytics/internal/queue"
 )
 
+const (
+	// maxRetries is the number of processing attempts before an event is sent
+	// to the dead-letter table.
+	maxRetries = 5
+	// baseRetryDelay is the initial back-off delay; each attempt doubles it.
+	baseRetryDelay = 200 * time.Millisecond
+	// maxRetryDelay caps the exponential back-off.
+	maxRetryDelay = 10 * time.Second
+)
+
 type Worker struct {
 	db    *db.DB
 	queue queue.Queue
@@ -50,9 +60,11 @@ func (w *Worker) Start(ctx context.Context) {
 					continue
 				}
 
-				if err := w.ProcessEvent(ctx, event); err != nil {
-					log.Printf("[analytics-worker] process event %s error: %v", event.EventID, err)
-				}
+				// Retry loop with exponential back-off.
+				// If the worker restarts mid-processing, the event remains in the
+				// Redis queue (BLPop only removes on successful dequeue) or in
+				// processed_events (idempotency guard catches duplicates).
+				w.processWithRetry(ctx, event)
 			}
 		}
 	}()
@@ -60,6 +72,48 @@ func (w *Worker) Start(ctx context.Context) {
 
 func (w *Worker) Stop() {
 	close(w.stop)
+}
+
+// processWithRetry attempts to process the event up to maxRetries times, with
+// exponential back-off. On exhaustion the event is written to dead_letter_events.
+func (w *Worker) processWithRetry(ctx context.Context, e *models.EventEnvelope) {
+	delay := baseRetryDelay
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := w.ProcessEvent(ctx, e)
+		if err == nil {
+			return
+		}
+
+		log.Printf("[analytics-worker] attempt %d/%d failed for event %s: %v", attempt, maxRetries, e.EventID, err)
+
+		if attempt == maxRetries {
+			reason := fmt.Sprintf("exhausted %d retries; last error: %v", maxRetries, err)
+			log.Printf("[analytics-worker] sending event %s to dead-letter: %s", e.EventID, reason)
+			payload, _ := json.Marshal(e)
+			if dlErr := w.db.InsertDeadLetter(ctx, e.AgentID, e.TenantID, e.EventID, e.LSN, reason, payload); dlErr != nil {
+				log.Printf("[analytics-worker] failed to insert dead-letter for event %s: %v", e.EventID, dlErr)
+			}
+			// Mark in processed_events so we do not retry on worker restart.
+			_, _ = w.db.ExecContext(ctx, `
+				INSERT INTO processed_events (event_id, tenant_id, processed_at, status, error_message)
+				VALUES ($1, $2, NOW(), 'dead_letter', $3)
+				ON CONFLICT (event_id) DO NOTHING
+			`, e.EventID, e.TenantID, reason)
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if delay < maxRetryDelay {
+			delay *= 2
+			if delay > maxRetryDelay {
+				delay = maxRetryDelay
+			}
+		}
+	}
 }
 
 func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) error {
@@ -264,6 +318,15 @@ func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) erro
 		return fmt.Errorf("commit tx: %w", err)
 	}
 
+	// 8. Advance the confirmed LSN cursor so the agent can restart safely.
+	// This is done outside the transaction: if it fails, the worst case is
+	// the agent re-delivers already-processed events, which idempotency handles.
+	if e.LSN != "" {
+		if curErr := w.db.UpsertAgentCursor(ctx, e.AgentID, e.LSN); curErr != nil {
+			log.Printf("[analytics-worker] warning: failed to advance agent cursor for %s to %s: %v", e.AgentID, e.LSN, curErr)
+		}
+	}
+
 	log.Printf("[analytics-worker] processed event %s (tenant=%s, lsn=%s)", e.EventID, e.TenantID, e.LSN)
 	return nil
 }
@@ -294,4 +357,3 @@ func getFloat(m map[string]interface{}, key string, def float64) float64 {
 	}
 	return def
 }
-

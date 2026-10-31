@@ -67,6 +67,9 @@ func main() {
 	r.Get("/v1/analytics/orders/breakdown", h.OrderBreakdown)
 	r.Get("/v1/analytics/status", h.Status)
 
+	// Dead-letter inspection endpoint
+	r.Get("/v1/analytics/dead-letter", h.ListDeadLetterEvents)
+
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: r,

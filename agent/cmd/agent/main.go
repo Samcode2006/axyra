@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -61,7 +63,11 @@ func main() {
 		}
 	}()
 
-	// 2. Initialize sender and mapper
+	// 2. Fetch confirmed LSN from the data plane ack endpoint (restart safety).
+	// On first run this returns "0/0" and we start from the WAL tip.
+	confirmedLSN := fetchConfirmedLSN(cfg)
+
+	// 3. Initialize sender and mapper
 	snd := sender.New(cfg)
 	snd.Start(ctx)
 
@@ -89,7 +95,7 @@ func main() {
 		}
 	}()
 
-	// 3. Select and start connector
+	// 4. Select and start connector
 	var conn connector.Connector
 	mode := os.Getenv("CONNECTOR_MODE")
 	if mode == "webhook" {
@@ -101,7 +107,9 @@ func main() {
 		for i, t := range cfg.Tables {
 			tableNames[i] = t.Name
 		}
-		conn = postgres.New(cfg.PostgresDSN, cfg.ReplicationSlot, cfg.PublicationName, tableNames)
+		pgConn := postgres.New(cfg.PostgresDSN, cfg.ReplicationSlot, cfg.PublicationName, tableNames)
+		pgConn.WithStartLSN(confirmedLSN)
+		conn = pgConn
 	}
 
 	go func() {
@@ -110,7 +118,7 @@ func main() {
 		}
 	}()
 
-	// 4. Graceful shutdown
+	// 5. Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
@@ -127,3 +135,46 @@ func main() {
 	log.Println("[axyra-agent] shutdown complete")
 }
 
+// fetchConfirmedLSN polls the analytics data plane ack endpoint and returns the
+// last confirmed LSN for this agent. On any failure it returns "" so the
+// connector starts from the current WAL tip (safe: idempotency handles re-delivery).
+func fetchConfirmedLSN(cfg *config.Config) string {
+	url := fmt.Sprintf("%s/v1/agent/ack", cfg.AxyraEndpoint)
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("[axyra-agent] could not build ack request: %v", err)
+		return ""
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", cfg.AgentToken))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[axyra-agent] ack endpoint unreachable, starting from WAL tip: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[axyra-agent] ack endpoint returned %d, starting from WAL tip", resp.StatusCode)
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+
+	var ack struct {
+		ConfirmedLSN string `json:"confirmed_lsn"`
+	}
+	if err := json.Unmarshal(body, &ack); err != nil {
+		return ""
+	}
+
+	if ack.ConfirmedLSN != "" && ack.ConfirmedLSN != "0/0" {
+		log.Printf("[axyra-agent] resuming from confirmed LSN: %s", ack.ConfirmedLSN)
+	}
+	return ack.ConfirmedLSN
+}

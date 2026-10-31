@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	_ "embed"
@@ -123,4 +124,39 @@ func (db *DB) GetDefaultTenant() string {
 		return tenantID
 	}
 	return "tenant_001"
+}
+
+// InsertDeadLetter stores an event that failed validation or exhausted retries.
+// tenantID and eventID may be empty when the event was rejected before parsing.
+func (db *DB) InsertDeadLetter(ctx context.Context, agentID, tenantID, eventID, lsn, reason string, payload []byte) error {
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO dead_letter_events (agent_id, tenant_id, event_id, lsn, reason, payload)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, agentID, tenantID, eventID, lsn, reason, string(payload))
+	return err
+}
+
+// GetAgentCursor returns the last confirmed LSN for an agent, or "0/0" if none.
+func (db *DB) GetAgentCursor(agentID string) (string, error) {
+	var lsn string
+	err := db.QueryRow(`SELECT confirmed_lsn FROM agent_cursors WHERE agent_id = $1`, agentID).Scan(&lsn)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "0/0", nil
+		}
+		return "0/0", err
+	}
+	return lsn, nil
+}
+
+// UpsertAgentCursor persists the last confirmed LSN so the agent can resume after restart.
+func (db *DB) UpsertAgentCursor(ctx context.Context, agentID, confirmedLSN string) error {
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO agent_cursors (agent_id, confirmed_lsn, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (agent_id) DO UPDATE SET
+			confirmed_lsn = EXCLUDED.confirmed_lsn,
+			updated_at = NOW()
+	`, agentID, confirmedLSN)
+	return err
 }

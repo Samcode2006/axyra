@@ -76,10 +76,34 @@ CREATE TABLE IF NOT EXISTS processing_watermarks (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Persistent LSN cursor used by the agent for restart safety.
+-- The agent polls GET /v1/agent/ack and resumes replication from this LSN.
+CREATE TABLE IF NOT EXISTS agent_cursors (
+    agent_id VARCHAR(64) PRIMARY KEY,
+    confirmed_lsn VARCHAR(64) NOT NULL DEFAULT '0/0',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Dead-letter queue: events that fail validation or exhaust processing retries.
+-- Operators can inspect and replay entries from the web console.
+CREATE TABLE IF NOT EXISTS dead_letter_events (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT '',
+    event_id VARCHAR(128) NOT NULL DEFAULT '',
+    lsn VARCHAR(64) NOT NULL DEFAULT '',
+    reason TEXT NOT NULL,
+    payload JSONB,
+    retry_count INT NOT NULL DEFAULT 0,
+    replayed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_raw_events_tenant_time ON raw_events(tenant_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_raw_events_agent_lsn ON raw_events(agent_id, lsn);
 CREATE INDEX IF NOT EXISTS idx_order_state_tenant_status ON order_state(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_order_summary_hourly_time ON order_summary_hourly(tenant_id, bucket);
 CREATE INDEX IF NOT EXISTS idx_order_summary_daily_time ON order_summary_daily(tenant_id, bucket);
 CREATE INDEX IF NOT EXISTS idx_product_aggregates_top ON product_aggregates(tenant_id, total_revenue DESC);
+CREATE INDEX IF NOT EXISTS idx_dead_letter_agent ON dead_letter_events(agent_id, created_at DESC);
 

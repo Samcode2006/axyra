@@ -19,9 +19,10 @@ type IngestRequest struct {
 }
 
 type IngestResponse struct {
-	Status  string `json:"status"`
-	Count   int    `json:"count"`
-	LastLSN string `json:"last_lsn,omitempty"`
+	Status   string `json:"status"`
+	Count    int    `json:"count"`
+	Rejected int    `json:"rejected,omitempty"`
+	LastLSN  string `json:"last_lsn,omitempty"`
 }
 
 type OrderSummary struct {

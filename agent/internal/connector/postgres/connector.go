@@ -20,6 +20,10 @@ type PostgresConnector struct {
 	slotName        string
 	publicationName string
 	tables          []string
+	// startLSN is the LSN to resume replication from. When empty the connector
+	// starts from the current WAL tip (first run). On subsequent runs the agent
+	// populates this from the last confirmed_lsn returned by GET /v1/agent/ack.
+	startLSN        string
 	conn            *pgconn.PgConn
 	relations       map[uint32]*pglogrepl.RelationMessage
 	mu              sync.Mutex
@@ -40,6 +44,15 @@ func New(dsn, slotName, publicationName string, tables []string) *PostgresConnec
 		tables:          tables,
 		relations:       make(map[uint32]*pglogrepl.RelationMessage),
 	}
+}
+
+// WithStartLSN sets the LSN from which replication should resume. "0/0" and ""
+// both mean "start from the current WAL tip".
+func (c *PostgresConnector) WithStartLSN(lsn string) *PostgresConnector {
+	if lsn != "" && lsn != "0/0" {
+		c.startLSN = lsn
+	}
+	return c
 }
 
 func (c *PostgresConnector) Start(ctx context.Context, out chan<- connector.ChangeEvent) error {
@@ -135,7 +148,17 @@ func (c *PostgresConnector) runReplication(ctx context.Context, out chan<- conne
 	}
 
 	// 4. Start replication
+	// Prefer the persisted cursor so we replay any events that were queued but
+	// not yet committed after the last agent restart.
 	startLSN := sysident.XLogPos
+	if c.startLSN != "" {
+		if parsed, err2 := pglogrepl.ParseLSN(c.startLSN); err2 == nil {
+			startLSN = parsed
+			log.Printf("[agent-postgres] resuming replication from persisted LSN %s", c.startLSN)
+		} else {
+			log.Printf("[agent-postgres] could not parse persisted LSN %q, starting from current tip: %v", c.startLSN, err2)
+		}
+	}
 	pluginArgs := []string{
 		"proto_version '1'",
 		fmt.Sprintf("publication_names '%s'", c.publicationName),

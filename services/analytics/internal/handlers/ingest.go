@@ -11,6 +11,40 @@ import (
 	"github.com/axyra/analytics/internal/models"
 )
 
+// supportedSchemaVersions lists all event schema versions the data plane accepts.
+var supportedSchemaVersions = map[int]bool{1: true}
+
+// validateEvent checks that a raw event envelope has all required fields and an
+// accepted schema version. It returns a human-readable reason when invalid.
+func validateEvent(e *models.EventEnvelope) string {
+	if e.EventID == "" {
+		return "event_id is required"
+	}
+	if e.ExternalTenantID == "" {
+		return "external_tenant_id is required"
+	}
+	if e.EventType == "" {
+		return "event_type is required"
+	}
+	if e.LSN == "" {
+		return "lsn is required"
+	}
+	if e.SchemaVersion == 0 {
+		// tolerate missing schema_version by treating it as v1
+		e.SchemaVersion = 1
+	}
+	if !supportedSchemaVersions[e.SchemaVersion] {
+		return fmt.Sprintf("unsupported schema_version %d; accepted: 1", e.SchemaVersion)
+	}
+	return ""
+}
+
+// mustMarshal marshals v to JSON bytes, returning nil on error.
+func mustMarshal(v interface{}) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}
+
 func (h *Handler) IngestEvents(w http.ResponseWriter, r *http.Request) {
 	token := extractBearerToken(r)
 	if token == "" {
@@ -57,9 +91,20 @@ func (h *Handler) IngestEvents(w http.ResponseWriter, r *http.Request) {
 
 	lastLSN := ""
 	resolvedEvents := make([]models.EventEnvelope, 0, len(events))
+	var rejectedCount int
 
 	for i := range events {
 		e := events[i]
+
+		// Schema validation — reject individual invalid events and continue
+		if reason := validateEvent(&e); reason != "" {
+			log.Printf("[analytics-ingest] rejecting event index %d from agent %s: %s", i, agentID, reason)
+			// Store in dead-letter for visibility
+			_ = h.db.InsertDeadLetter(r.Context(), agentID, "", e.EventID, e.LSN, reason, mustMarshal(e))
+			rejectedCount++
+			continue
+		}
+
 		e.AgentID = agentID
 
 		if e.OccurredAt.IsZero() {
@@ -83,15 +128,18 @@ func (h *Handler) IngestEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Push to queue
-	if err := h.queue.Push(r.Context(), resolvedEvents); err != nil {
-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to queue events: %v", err))
-		return
+	if len(resolvedEvents) > 0 {
+		if err := h.queue.Push(r.Context(), resolvedEvents); err != nil {
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to queue events: %v", err))
+			return
+		}
 	}
 
 	respondJSON(w, http.StatusAccepted, models.IngestResponse{
-		Status:  "accepted",
-		Count:   len(resolvedEvents),
-		LastLSN: lastLSN,
+		Status:   "accepted",
+		Count:    len(resolvedEvents),
+		Rejected: rejectedCount,
+		LastLSN:  lastLSN,
 	})
 }
 
@@ -108,25 +156,23 @@ func (h *Handler) AgentAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var lastLSN string
+	// confirmed_lsn from agent_cursors is the restart-safe cursor position.
+	// The agent should resume WAL replication from this LSN after a restart.
+	confirmedLSN, _ := h.db.GetAgentCursor(agentID)
+
 	var lastProcessedAt time.Time
-	err = h.db.QueryRowContext(r.Context(), `
-		SELECT last_lsn, last_processed_at 
-		FROM processing_watermarks 
+	_ = h.db.QueryRowContext(r.Context(), `
+		SELECT last_processed_at
+		FROM processing_watermarks
 		WHERE agent_id = $1
-	`, agentID).Scan(&lastLSN, &lastProcessedAt)
-	if err != nil {
-		respondJSON(w, http.StatusOK, map[string]interface{}{
-			"agent_id":          agentID,
-			"last_lsn":          "0/0",
-			"last_processed_at": time.Now().UTC(),
-		})
-		return
+	`, agentID).Scan(&lastProcessedAt)
+	if lastProcessedAt.IsZero() {
+		lastProcessedAt = time.Now().UTC()
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id":          agentID,
-		"last_lsn":          lastLSN,
+		"confirmed_lsn":     confirmedLSN,
 		"last_processed_at": lastProcessedAt,
 	})
 }
