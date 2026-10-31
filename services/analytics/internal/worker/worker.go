@@ -61,9 +61,8 @@ func (w *Worker) Start(ctx context.Context) {
 				}
 
 				// Retry loop with exponential back-off.
-				// If the worker restarts mid-processing, the event remains in the
-				// Redis queue (BLPop only removes on successful dequeue) or in
-				// processed_events (idempotency guard catches duplicates).
+				// BLPop removes the event before processing; this retry loop does
+				// not protect an in-flight event against a process crash.
 				w.processWithRetry(ctx, event)
 			}
 		}
@@ -117,23 +116,29 @@ func (w *Worker) processWithRetry(ctx context.Context, e *models.EventEnvelope) 
 }
 
 func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) error {
-	// 1. Check deduplication
-	var alreadyProcessed bool
-	err := w.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = $1)", e.EventID).Scan(&alreadyProcessed)
-	if err == nil && alreadyProcessed {
-		log.Printf("[analytics-worker] skipping duplicate event: %s", e.EventID)
-		return nil
-	}
-
 	// 2. Start transaction
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
+	if err := db.LockTenant(ctx, tx, e.TenantID); err != nil {
+		return fmt.Errorf("lock tenant: %w", err)
+	}
+	// Check after acquiring the lock so a concurrent delivery cannot apply twice.
+	var alreadyProcessed bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM processed_events WHERE event_id = $1)", e.EventID).Scan(&alreadyProcessed); err != nil {
+		return fmt.Errorf("check deduplication: %w", err)
+	}
+	if alreadyProcessed {
+		return nil
+	}
 
 	// 3. Insert raw event
-	rawBytes, _ := json.Marshal(e.Data)
+	rawBytes, err := json.Marshal(e.Data)
+	if err != nil {
+		return fmt.Errorf("encode event: %w", err)
+	}
 	occurredAt := e.OccurredAt
 	if occurredAt.IsZero() {
 		occurredAt = time.Now().UTC()

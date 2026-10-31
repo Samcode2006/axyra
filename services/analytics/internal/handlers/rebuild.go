@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axyra/analytics/internal/aggregate"
+	"github.com/axyra/analytics/internal/db"
 )
 
 // Rebuild truncates all precomputed aggregates for a tenant and replays
@@ -52,7 +53,7 @@ func (h *Handler) Rebuild(w http.ResponseWriter, r *http.Request) {
 const rebuildBatchSize = 2000
 
 // rebuildTenant clears and re-derives all aggregates for tenantID by streaming
-// raw_events in chronological order and applying the same upsert logic used
+// raw_events in ledger insertion order and applying the same upsert logic used
 // by the worker.
 func (h *Handler) rebuildTenant(ctx context.Context, tenantID string) (int, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
@@ -60,6 +61,9 @@ func (h *Handler) rebuildTenant(ctx context.Context, tenantID string) (int, erro
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
+	if err := db.LockTenant(ctx, tx, tenantID); err != nil {
+		return 0, fmt.Errorf("lock tenant: %w", err)
+	}
 
 	// 1. Clear all precomputed aggregates for this tenant. The list lives next to
 	// the engine that writes the tables, so the two cannot drift apart.
@@ -69,7 +73,8 @@ func (h *Handler) rebuildTenant(ctx context.Context, tenantID string) (int, erro
 		}
 	}
 
-	// 2. Replay raw events in chronological order, in keyset-paginated batches.
+	// 2. Replay in ledger insertion order, matching live processing even when
+	// source timestamps arrive out of order. The tenant lock freezes this ledger.
 	//
 	// Each batch is read completely and its cursor closed before any event is
 	// applied: lib/pq cannot run other statements on the same connection while a
@@ -85,18 +90,16 @@ func (h *Handler) rebuildTenant(ctx context.Context, tenantID string) (int, erro
 	}
 	var (
 		processed int
-		lastAt    time.Time
 		lastID    int64
-		first     = true
 	)
 	for {
 		rows, err := tx.QueryContext(ctx, `
 			SELECT id, event_id, schema_version, occurred_at, data
 			FROM raw_events
-			WHERE tenant_id = $1 AND ($2::boolean OR (occurred_at, id) > ($3, $4))
-			ORDER BY occurred_at ASC, id ASC
-			LIMIT $5
-		`, tenantID, first, lastAt, lastID, rebuildBatchSize)
+			WHERE tenant_id = $1 AND id > $2
+			ORDER BY id ASC
+			LIMIT $3
+		`, tenantID, lastID, rebuildBatchSize)
 		if err != nil {
 			return processed, fmt.Errorf("query raw events: %w", err)
 		}
@@ -121,7 +124,7 @@ func (h *Handler) rebuildTenant(ctx context.Context, tenantID string) (int, erro
 		for _, ev := range batch {
 			var data map[string]interface{}
 			if err := json.Unmarshal(ev.data, &data); err != nil {
-				continue // skip unparseable rows
+				return processed, fmt.Errorf("decode event %s: %w", ev.eventID, err)
 			}
 			if err := aggregate.ProcessOrderEvent(ctx, tx, tenantID, ev.occurredAt, data, ev.schemaVersion); err != nil {
 				return processed, fmt.Errorf("apply event %s: %w", ev.eventID, err)
@@ -129,7 +132,7 @@ func (h *Handler) rebuildTenant(ctx context.Context, tenantID string) (int, erro
 			processed++
 		}
 		last := batch[len(batch)-1]
-		lastAt, lastID, first = last.occurredAt, last.id, false
+		lastID = last.id
 	}
 
 	if err := tx.Commit(); err != nil {

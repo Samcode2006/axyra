@@ -1,5 +1,32 @@
 # Axyra Bulk Seed
 
+## Recover existing orders missing from analytics
+
+After the source is registered and its agent is streaming, run from
+`scripts/seed` in PowerShell:
+
+```powershell
+go run -mod=mod . -backfill -stores "store_001" -batch 1000 -dsn "postgres://postgres:postgres@localhost:5433/reference_db"
+```
+
+Use the store ID and database port belonging to each source. This mode generates
+no synthetic rows. It emits an UPDATE for each existing matching order in bounded
+batches, keeping its field values and original timestamps unchanged. Custom
+database UPDATE triggers still execute. It requires an active replication slot
+and publication and cannot be combined with `-truncate` or `-wait-for-agent 0`.
+Generation flags such as `-rows`, `-from`, and `-to` do not filter backfill; it
+visits all existing orders for the explicitly supplied stores.
+
+The reported count is rows re-emitted, not confirmation that analytics has
+finished. Let ingestion drain, then check the appropriate historical date range.
+If a batch fails, earlier batches remain committed; rerunning is safe for
+analytics order totals because events update existing order state. Backfill
+recovers current source state, not missing historical transitions or deleted
+source rows. Rebuild alone only replays the ledger it already has.
+
+For database tests, set `TEST_BACKFILL_DATABASE_URL` to a disposable PostgreSQL
+database without an `orders` table and run `go test ./...`.
+
 High-throughput data generator for the reference client PostgreSQL database.  
 Uses the PostgreSQL **COPY** protocol (`pgx`) to achieve **500K – 2M rows/second**, making it practical to seed 10M – 1B rows on a development machine in a few minutes.
 

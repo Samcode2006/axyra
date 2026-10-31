@@ -85,6 +85,7 @@ type config struct {
 	fromTime     time.Time
 	toTime       time.Time
 	truncate     bool
+	backfill     bool
 	waitForAgent time.Duration
 	// seed makes a run reproducible: the same seed, flags and worker count
 	// generate the same rows (apart from the time-based order ids' sequence).
@@ -101,9 +102,21 @@ func parseFlags() config {
 	fromStr := flag.String("from", "", "Earliest created_at (RFC3339); default 60 days ago")
 	toStr := flag.String("to", "", "Latest created_at (RFC3339); default now")
 	truncate := flag.Bool("truncate", false, "Truncate orders table before seeding")
+	backfill := flag.Bool("backfill", false, "Re-emit existing orders through CDC instead of generating rows; requires -stores")
 	seed := flag.Int64("seed", 0, "Random seed for reproducible data; 0 picks one from the clock")
 	waitForAgent := flag.Duration("wait-for-agent", 60*time.Second, "Wait for orders publication and streaming replication before inserts; 0 disables for standalone use")
 	flag.Parse()
+	if *backfill {
+		explicitStores := false
+		flag.Visit(func(f *flag.Flag) {
+			if f.Name == "stores" {
+				explicitStores = true
+			}
+		})
+		if !explicitStores || *truncate || *waitForAgent <= 0 || *batch <= 0 {
+			log.Fatal("-backfill requires explicit -stores, positive -batch and -wait-for-agent, and cannot use -truncate")
+		}
+	}
 
 	now := time.Now().UTC()
 	fromTime := now.Add(-60 * 24 * time.Hour)
@@ -139,6 +152,7 @@ func parseFlags() config {
 		fromTime:     fromTime,
 		toTime:       toTime,
 		truncate:     *truncate,
+		backfill:     *backfill,
 		seed:         *seed,
 		waitForAgent: *waitForAgent,
 	}
@@ -170,6 +184,17 @@ func main() {
 		log.Fatalf("ping: %v", err)
 	}
 	log.Println("bulk_seed: connected to database")
+	if cfg.backfill {
+		if err := waitForReplication(ctx, pool, cfg.waitForAgent); err != nil {
+			log.Fatalf("backfill: no rows re-emitted: %v", err)
+		}
+		count, err := backfillOrders(ctx, pool, cfg.storeIDs, cfg.batchSize)
+		if err != nil {
+			log.Fatalf("backfill: re-emitted %d rows before failure: %v; rerun after resolving the error", count, err)
+		}
+		log.Printf("backfill: re-emitted %d existing rows; analytics processes these asynchronously", count)
+		return
+	}
 
 	// Ensure table exists (FastAPI creates it on startup; if running standalone it won't).
 	if _, err := pool.Exec(ctx, createTableSQL); err != nil {

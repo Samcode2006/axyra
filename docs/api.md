@@ -1,5 +1,28 @@
 # Axyra REST API Reference
 
+## Rebuilding analytics
+
+`POST /v1/analytics/rebuild?tenant_id=...` reconstructs derived tables from the
+tenant's captured `raw_events`. Rebuild and live ingestion acquire the same
+PostgreSQL transaction lock per tenant, including across Analytics replicas.
+Events waiting on that lock resume after the rebuild commits. Concurrent
+rebuilds also serialize. Queries see committed data, never partially cleared
+tables. A failed or cancelled rebuild rolls back.
+
+Replay uses ledger insertion order, matching live processing rather than
+sorting source timestamps. Rebuild does not import missing source rows or
+reconstruct changes absent from the ledger. Use the seed tool's explicit
+`-backfill` mode for existing source orders that were never captured (see
+`scripts/seed/README.md`). Deleted source rows and missing historical transitions
+require a separate authoritative backup or change history.
+
+Database regression tests compare every derived table after live processing
+and repeated replay, and exercise concurrent ingestion, duplicate events,
+lock cancellation and malformed-event rollback. Run Analytics tests with
+`TEST_REBUILD_DATABASE_URL` pointing to a disposable PostgreSQL database.
+
+## Access
+
 **Base URL:** All endpoints are served from the control plane at the configured host (default `http://localhost:8081`).  
 **Auth:** Every endpoint except `/health` and `POST /v1/auth/login` requires a valid `Authorization: Bearer <token>` console session JWT.  
 **Analytics endpoints** are proxied through the control plane; tenant scope is enforced server-side before forwarding.
