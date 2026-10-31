@@ -50,7 +50,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      POSTGRES_DSN: postgres://postgres:postgres@reference-db:5432/reference_db
+      POSTGRES_DSN: postgres://postgres:postgres@reference-db:5432/reference_db?sslmode=disable
       AXYRA_ENDPOINT: http://analytics:8082
       AXYRA_AGENT_TOKEN: ${AXYRA_AGENT_TOKEN}
       REPLICATION_SLOT: axyra_slot
@@ -76,10 +76,10 @@ services:
     ports:
       - "5434:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      test: ["CMD-SHELL", "pg_isready -U postgres -d axyra_platform"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
 
   redis:
     image: redis:7-alpine
@@ -98,7 +98,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform
+      DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform?sslmode=disable
       REDIS_URL: redis://redis:6379
       ANALYTICS_URL: http://analytics:8082
       AXYRA_AGENT_TOKEN: ${AXYRA_AGENT_TOKEN}
@@ -113,9 +113,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   analytics:
     build:
@@ -123,7 +124,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform
+      DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform?sslmode=disable
       REDIS_URL: redis://redis:6379
       CONTROL_PLANE_URL: http://control-plane:8081
       PORT: 8082
@@ -138,9 +139,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8082/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   # ─── Axyra Web Console ───────────────────────────────────────────────────────
 

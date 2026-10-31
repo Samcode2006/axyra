@@ -73,7 +73,15 @@ func (c *PostgresConnector) Start(ctx context.Context, out chan<- connector.Chan
 
 func (c *PostgresConnector) runReplication(ctx context.Context, out chan<- connector.ChangeEvent) error {
 	// 1. Establish replication connection
-	connCfg, err := pgconn.ParseConfig(c.dsn)
+	dsn := c.dsn
+	if !strings.Contains(dsn, "sslmode=") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&sslmode=disable"
+		} else {
+			dsn += "?sslmode=disable"
+		}
+	}
+	connCfg, err := pgconn.ParseConfig(dsn)
 	if err != nil {
 		return fmt.Errorf("parse dsn: %w", err)
 	}

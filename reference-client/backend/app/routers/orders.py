@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .database import get_db
-from .models import Order
-from .schemas import OrderCreate, OrderUpdate, OrderOut, OrderListOut
+from ..database import get_db
+from ..models import Order
+from ..schemas import OrderCreate, OrderUpdate, OrderOut, OrderListOut
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 

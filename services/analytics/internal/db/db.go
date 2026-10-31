@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -17,13 +19,36 @@ type DB struct {
 }
 
 func Connect(dsn string) (*DB, error) {
-	sdb, err := sql.Open("postgres", dsn)
+	// Ensure sslmode=disable if not specified
+	if !strings.Contains(dsn, "sslmode=") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&sslmode=disable"
+		} else {
+			dsn += "?sslmode=disable"
+		}
+	}
+
+	var sdb *sql.DB
+	var err error
+
+	for attempt := 1; attempt <= 20; attempt++ {
+		sdb, err = sql.Open("postgres", dsn)
+		if err == nil {
+			err = sdb.Ping()
+			if err == nil {
+				log.Printf("[analytics-db] connected to postgres successfully on attempt %d", attempt)
+				break
+			}
+			_ = sdb.Close()
+		}
+		log.Printf("[analytics-db] waiting for postgres (%d/20): %v", attempt, err)
+		time.Sleep(1 * time.Second)
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, fmt.Errorf("failed to connect to analytics db after 20 attempts: %w", err)
 	}
-	if err := sdb.Ping(); err != nil {
-		return nil, fmt.Errorf("ping db: %w", err)
-	}
+
 	sdb.SetMaxOpenConns(25)
 	sdb.SetMaxIdleConns(10)
 
@@ -92,4 +117,3 @@ func (db *DB) GetDefaultTenant() string {
 	}
 	return "tenant_001"
 }
-

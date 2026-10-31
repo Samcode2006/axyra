@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -12,15 +14,38 @@ import (
 //go:embed 001_init.sql
 var initMigration string
 
-// Connect opens a connection to PostgreSQL and pings it to confirm connectivity.
+// Connect opens a connection to PostgreSQL with retries and pings it to confirm connectivity.
 func Connect(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("postgres", dsn)
+	// Ensure sslmode=disable if not specified
+	if !strings.Contains(dsn, "sslmode=") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&sslmode=disable"
+		} else {
+			dsn += "?sslmode=disable"
+		}
+	}
+
+	var db *sql.DB
+	var err error
+
+	for attempt := 1; attempt <= 20; attempt++ {
+		db, err = sql.Open("postgres", dsn)
+		if err == nil {
+			err = db.Ping()
+			if err == nil {
+				log.Printf("[control-plane-db] connected to postgres successfully on attempt %d", attempt)
+				break
+			}
+			_ = db.Close()
+		}
+		log.Printf("[control-plane-db] waiting for postgres (%d/20): %v", attempt, err)
+		time.Sleep(1 * time.Second)
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, fmt.Errorf("failed to connect to db after 20 attempts: %w", err)
 	}
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("ping db: %w", err)
-	}
+
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 
