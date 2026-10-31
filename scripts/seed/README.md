@@ -51,7 +51,24 @@ After upgrading from event-time bucketing, rebuild each affected tenant through
 `POST /v1/analytics/rebuild?tenant_id=...` while ingestion is idle. This replays
 stored raw events using the corrected dates; it does not import source rows that
 were never captured. Ensure `orders` is in the agent's PostgreSQL publication
-before seeding (restart the agent after initially creating the table).
+before seeding. The seeder now waits up to 60 seconds for the orders publication
+and a streaming Axyra replication slot before inserting. If they are unavailable,
+it exits with an error instead of silently seeding uncaptured rows. Use
+`-wait-for-agent 120s` for slower startup or `-wait-for-agent 0` only for intentional
+standalone seeding without Analytics.
+
+The agent retries unavailable configured databases, waits for missing tables,
+and checks publication membership every five seconds. Creating or recreating
+tables is repaired automatically. Application writers must wait for replication
+readiness too: inserts made before a table is published are not backfilled.
+
+When changing the database count, update `TENANT_COUNT` in `deploy/.env`,
+regenerate Compose with `deploy/generate-compose.sh`, and apply the generated
+configuration. On Windows, run that shell script through Git Bash or WSL.
+The source list is loaded at agent startup; changing `.env` alone does not change
+a running container. For nonconsecutive or custom databases, configure explicit
+`sources` in the agent YAML and recreate/restart the agent. Removing a source
+does not delete its database volume or historical Analytics data.
 
 | Field | Detail |
 |---|---|

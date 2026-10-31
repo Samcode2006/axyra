@@ -76,15 +76,16 @@ var statusWeights = []float64{0.25, 0.20, 0.20, 0.23, 0.08, 0.04}
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 type config struct {
-	dsn        string
-	totalRows  int64
-	storeIDs   []string
-	cancelRate float64
-	batchSize  int
-	workers    int
-	fromTime   time.Time
-	toTime     time.Time
-	truncate   bool
+	dsn          string
+	totalRows    int64
+	storeIDs     []string
+	cancelRate   float64
+	batchSize    int
+	workers      int
+	fromTime     time.Time
+	toTime       time.Time
+	truncate     bool
+	waitForAgent time.Duration
 	// seed makes a run reproducible: the same seed, flags and worker count
 	// generate the same rows (apart from the time-based order ids' sequence).
 	seed int64
@@ -101,6 +102,7 @@ func parseFlags() config {
 	toStr := flag.String("to", "", "Latest created_at (RFC3339); default now")
 	truncate := flag.Bool("truncate", false, "Truncate orders table before seeding")
 	seed := flag.Int64("seed", 0, "Random seed for reproducible data; 0 picks one from the clock")
+	waitForAgent := flag.Duration("wait-for-agent", 60*time.Second, "Wait for orders publication and streaming replication before inserts; 0 disables for standalone use")
 	flag.Parse()
 
 	now := time.Now().UTC()
@@ -128,16 +130,17 @@ func parseFlags() config {
 	}
 
 	return config{
-		dsn:        *dsn,
-		totalRows:  *rows,
-		storeIDs:   storeList,
-		cancelRate: *cancelRate,
-		batchSize:  *batch,
-		workers:    *workers,
-		fromTime:   fromTime,
-		toTime:     toTime,
-		truncate:   *truncate,
-		seed:       *seed,
+		dsn:          *dsn,
+		totalRows:    *rows,
+		storeIDs:     storeList,
+		cancelRate:   *cancelRate,
+		batchSize:    *batch,
+		workers:      *workers,
+		fromTime:     fromTime,
+		toTime:       toTime,
+		truncate:     *truncate,
+		seed:         *seed,
+		waitForAgent: *waitForAgent,
 	}
 }
 
@@ -168,17 +171,23 @@ func main() {
 	}
 	log.Println("bulk_seed: connected to database")
 
+	// Ensure table exists (FastAPI creates it on startup; if running standalone it won't).
+	if _, err := pool.Exec(ctx, createTableSQL); err != nil {
+		log.Fatalf("bulk_seed: create table: %v", err)
+	}
+	if cfg.waitForAgent > 0 {
+		log.Println("bulk_seed: waiting for orders publication and streaming agent...")
+		if err := waitForReplication(ctx, pool, cfg.waitForAgent); err != nil {
+			log.Fatalf("bulk_seed: no rows inserted: %v", err)
+		}
+	}
+
 	if cfg.truncate {
 		log.Println("bulk_seed: truncating orders table...")
 		if _, err := pool.Exec(ctx, "TRUNCATE TABLE orders RESTART IDENTITY CASCADE"); err != nil {
 			log.Fatalf("truncate: %v", err)
 		}
 		log.Println("bulk_seed: truncate done")
-	}
-
-	// Ensure table exists (FastAPI creates it on startup; if running standalone it won't).
-	if _, err := pool.Exec(ctx, createTableSQL); err != nil {
-		log.Printf("bulk_seed: create table (may already exist): %v", err)
 	}
 
 	startTime := time.Now()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/axyra/agent/internal/connector"
 	"github.com/jackc/pglogrepl"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -107,7 +108,9 @@ func (c *PostgresConnector) runReplication(ctx context.Context, out chan<- conne
 	}
 	defer normalConn.Close(context.Background())
 
-	c.ensurePublication(ctx, normalConn)
+	if err := c.ensurePublication(ctx, normalConn); err != nil {
+		return err
+	}
 
 	// Now configure replication mode
 	if connCfg.RuntimeParams == nil {
@@ -149,15 +152,28 @@ func (c *PostgresConnector) runReplication(ctx context.Context, out chan<- conne
 	}
 
 	// 4. Start replication
-	// Prefer the persisted cursor so we replay any events that were queued but
-	// not yet committed after the last agent restart.
+	// Resume from this database's slot, not its current WAL tip. A source may
+	// have been offline while new orders were committed. Ignore cursors from a
+	// previous database incarnation if they fall outside this slot's WAL range.
 	startLSN := sysident.XLogPos
+	slot := normalConn.ExecParams(ctx,
+		"SELECT confirmed_flush_lsn::text, restart_lsn::text FROM pg_replication_slots WHERE slot_name=$1",
+		[][]byte{[]byte(c.slotName)}, nil, nil, nil).Read()
+	if slot.Err != nil || len(slot.Rows) != 1 {
+		return fmt.Errorf("read replication slot cursor: %v", slot.Err)
+	}
+	confirmed, err := pglogrepl.ParseLSN(string(slot.Rows[0][0]))
+	if err != nil {
+		return fmt.Errorf("parse slot cursor: %w", err)
+	}
+	startLSN = confirmed
+	restart, _ := pglogrepl.ParseLSN(string(slot.Rows[0][1]))
 	if c.startLSN != "" {
-		if parsed, err2 := pglogrepl.ParseLSN(c.startLSN); err2 == nil {
+		if parsed, err2 := pglogrepl.ParseLSN(c.startLSN); err2 == nil && parsed >= restart && parsed <= confirmed {
 			startLSN = parsed
 			log.Printf("[agent-postgres] resuming replication from persisted LSN %s", c.startLSN)
 		} else {
-			log.Printf("[agent-postgres] could not parse persisted LSN %q, starting from current tip: %v", c.startLSN, err2)
+			log.Printf("[agent-postgres] persisted LSN %q is invalid or outside retained slot WAL; using slot cursor %s", c.startLSN, startLSN)
 		}
 	}
 	pluginArgs := []string{
@@ -175,6 +191,7 @@ func (c *PostgresConnector) runReplication(ctx context.Context, out chan<- conne
 	}
 
 	lastStatusUpdate := time.Now()
+	lastPublicationCheck := time.Now()
 	var currentLSN pglogrepl.LSN = startLSN
 
 	// 5. Message loop
@@ -185,6 +202,12 @@ func (c *PostgresConnector) runReplication(ctx context.Context, out chan<- conne
 		default:
 		}
 
+		if time.Since(lastPublicationCheck) >= 5*time.Second {
+			if err := c.ensurePublication(ctx, normalConn); err != nil {
+				return err
+			}
+			lastPublicationCheck = time.Now()
+		}
 		if time.Since(lastStatusUpdate) > 10*time.Second {
 			_ = pglogrepl.SendStandbyStatusUpdate(ctx, conn, pglogrepl.StandbyStatusUpdate{
 				WALWritePosition: currentLSN,
@@ -331,37 +354,51 @@ func (c *PostgresConnector) handleLogicalMessage(m pglogrepl.Message, lsn string
 	}
 }
 
-func (c *PostgresConnector) ensurePublication(ctx context.Context, conn *pgconn.PgConn) {
-	// Try creating publication for configured tables or create empty and add
-	var tableList string
-	if len(c.tables) > 0 {
-		tableList = strings.Join(c.tables, ", ")
-	} else {
-		tableList = "orders"
+func (c *PostgresConnector) ensurePublication(ctx context.Context, conn *pgconn.PgConn) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	tables := c.tables
+	if len(tables) == 0 {
+		tables = []string{"orders"}
 	}
-
-	query := fmt.Sprintf(`
-		DO $$
-		BEGIN
-			IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = '%s') THEN
-				BEGIN
-					CREATE PUBLICATION %s FOR TABLE %s;
-				EXCEPTION WHEN undefined_table THEN
-					CREATE PUBLICATION %s;
-				END;
-			ELSE
-				BEGIN
-					ALTER PUBLICATION %s ADD TABLE %s;
-				EXCEPTION WHEN OTHERS THEN
-					NULL;
-				END;
-			END IF;
-		END
-		$$;
-	`, c.publicationName, c.publicationName, tableList, c.publicationName, c.publicationName, tableList)
-
-	res := conn.Exec(ctx, query)
-	_, _ = res.ReadAll()
+	publication := pgx.Identifier{c.publicationName}.Sanitize()
+	result := conn.ExecParams(ctx, "SELECT puballtables FROM pg_publication WHERE pubname=$1",
+		[][]byte{[]byte(c.publicationName)}, nil, nil, nil).Read()
+	if result.Err != nil {
+		return fmt.Errorf("inspect publication: %w", result.Err)
+	}
+	if len(result.Rows) == 0 {
+		names := make([]string, len(tables))
+		for i, table := range tables {
+			names[i] = pgx.Identifier(strings.Split(table, ".")).Sanitize()
+		}
+		_, err := conn.Exec(ctx, "CREATE PUBLICATION "+publication+" FOR TABLE "+strings.Join(names, ", ")).ReadAll()
+		if err != nil {
+			return fmt.Errorf("create publication (waiting for configured tables): %w", err)
+		}
+		return nil
+	}
+	allTables := string(result.Rows[0][0]) == "t"
+	for _, table := range tables {
+		name := pgx.Identifier(strings.Split(table, ".")).Sanitize()
+		result := conn.ExecParams(ctx, `SELECT to_regclass($1)::text,
+			EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname=$2
+			AND to_regclass(format('%I.%I', schemaname, tablename))=to_regclass($1))`,
+			[][]byte{[]byte(name), []byte(c.publicationName)}, nil, nil, nil).Read()
+		if result.Err != nil {
+			return fmt.Errorf("inspect publication table %s: %w", table, result.Err)
+		}
+		if len(result.Rows) == 0 || result.Rows[0][0] == nil {
+			return fmt.Errorf("publication %s waiting for table %s", c.publicationName, table)
+		}
+		if !allTables && string(result.Rows[0][1]) != "t" {
+			if _, err := conn.Exec(ctx, "ALTER PUBLICATION "+publication+" ADD TABLE "+name).ReadAll(); err != nil {
+				return fmt.Errorf("add publication table %s: %w", table, err)
+			}
+			log.Printf("[agent-postgres] added table %s to publication %s", table, c.publicationName)
+		}
+	}
+	return nil
 }
 
 func decodeTuple(rel *pglogrepl.RelationMessage, tuple *pglogrepl.TupleData) map[string]interface{} {
