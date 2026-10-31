@@ -130,3 +130,4 @@ func (m *Mapper) Map(ce connector.ChangeEvent) (*AxyraEvent, error) {
 		Data:             data,
 	}, nil
 }
+

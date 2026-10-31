@@ -60,3 +60,4 @@ func (h *Handler) CreateOrganization(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: now,
 	})
 }
+

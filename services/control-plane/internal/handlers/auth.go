@@ -41,3 +41,4 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, models.LoginResponse{Token: tokenString})
 }
+

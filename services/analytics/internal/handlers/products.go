@@ -46,3 +46,4 @@ func (h *Handler) TopProducts(w http.ResponseWriter, r *http.Request) {
 		Data:     products,
 	})
 }
+

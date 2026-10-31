@@ -82,3 +82,4 @@ CREATE INDEX IF NOT EXISTS idx_order_state_tenant_status ON order_state(tenant_i
 CREATE INDEX IF NOT EXISTS idx_order_summary_hourly_time ON order_summary_hourly(tenant_id, bucket);
 CREATE INDEX IF NOT EXISTS idx_order_summary_daily_time ON order_summary_daily(tenant_id, bucket);
 CREATE INDEX IF NOT EXISTS idx_product_aggregates_top ON product_aggregates(tenant_id, total_revenue DESC);
+

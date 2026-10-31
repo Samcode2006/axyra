@@ -44,3 +44,4 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		IsHealthy:       true,
 	})
 }
+

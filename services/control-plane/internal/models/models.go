@@ -127,3 +127,4 @@ type PaginatedResponse[T any] struct {
 	Page    int `json:"page"`
 	PerPage int `json:"per_page"`
 }
+

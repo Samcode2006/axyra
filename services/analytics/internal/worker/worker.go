@@ -294,3 +294,4 @@ func getFloat(m map[string]interface{}, key string, def float64) float64 {
 	}
 	return def
 }
+

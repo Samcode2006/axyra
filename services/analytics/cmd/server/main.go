@@ -91,3 +91,4 @@ func main() {
 	_ = server.Shutdown(shutdownCtx)
 	log.Println("[analytics] server stopped")
 }
+

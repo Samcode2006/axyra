@@ -80,3 +80,4 @@ type AnalyticsStatus struct {
 	LagSeconds      float64   `json:"lag_seconds"`
 	IsHealthy       bool      `json:"is_healthy"`
 }
+

@@ -47,3 +47,4 @@ func TestMemoryQueuePushPop(t *testing.T) {
 		t.Errorf("expected EventID 'evt_1', got '%s'", popped.EventID)
 	}
 }
+

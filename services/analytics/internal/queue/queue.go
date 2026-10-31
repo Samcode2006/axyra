@@ -135,3 +135,4 @@ func (m *MemoryQueue) Close() error {
 	}
 	return nil
 }
+

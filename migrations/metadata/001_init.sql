@@ -73,3 +73,4 @@ CREATE TABLE IF NOT EXISTS metric_definitions (
 CREATE INDEX IF NOT EXISTS idx_tenants_org ON tenants(organization_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_mappings_agent ON tenant_mappings(agent_id, external_tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agent_tokens_token ON agent_tokens(token) WHERE revoked_at IS NULL;
+

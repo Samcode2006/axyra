@@ -70,3 +70,4 @@ func (h *Handler) OrderSummary(w http.ResponseWriter, r *http.Request) {
 		LastProcessedAt: lastProcessedAt,
 	})
 }
+

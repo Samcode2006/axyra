@@ -77,3 +77,4 @@ func TestSenderBatchDelivery(t *testing.T) {
 
 	_ = snd.Close()
 }
+

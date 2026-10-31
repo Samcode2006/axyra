@@ -25,3 +25,4 @@ func (h *Handler) AnalyticsProxy() http.HandlerFunc {
 		proxy.ServeHTTP(w, r)
 	}
 }
+

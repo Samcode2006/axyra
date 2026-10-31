@@ -25,3 +25,4 @@ func TestConfigLoadWithEnv(t *testing.T) {
 		t.Errorf("expected AgentID 'agent_custom_001', got '%s'", cfg.AgentID)
 	}
 }
+

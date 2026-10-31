@@ -92,3 +92,4 @@ func (db *DB) GetDefaultTenant() string {
 	}
 	return "tenant_001"
 }
+

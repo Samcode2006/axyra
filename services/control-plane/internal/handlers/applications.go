@@ -62,3 +62,4 @@ func (h *Handler) CreateApplication(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      now,
 	})
 }
+

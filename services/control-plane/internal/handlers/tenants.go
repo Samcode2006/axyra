@@ -128,3 +128,4 @@ func (h *Handler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, t)
 }
+

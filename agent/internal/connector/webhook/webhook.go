@@ -98,3 +98,4 @@ func (w *WebhookConnector) Close() error {
 	}
 	return nil
 }
+

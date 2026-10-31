@@ -1,8 +1,8 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:bookworm AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache git
+ENV GOTOOLCHAIN=auto
 
 COPY go.mod go.sum ./
 RUN go mod download

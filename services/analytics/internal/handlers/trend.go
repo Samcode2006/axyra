@@ -87,3 +87,4 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 		Data:     trendPoints,
 	})
 }
+

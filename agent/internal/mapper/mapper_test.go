@@ -101,3 +101,4 @@ func TestMapperOrderCancelled(t *testing.T) {
 		t.Errorf("expected EventType order.cancelled, got %s", event.EventType)
 	}
 }
+

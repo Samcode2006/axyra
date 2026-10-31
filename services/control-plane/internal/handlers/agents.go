@@ -185,3 +185,4 @@ func (h *Handler) CreateTenantMapping(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:        now,
 	})
 }
+

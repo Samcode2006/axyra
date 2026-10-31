@@ -126,3 +126,4 @@ func main() {
 
 	log.Println("[axyra-agent] shutdown complete")
 }
+

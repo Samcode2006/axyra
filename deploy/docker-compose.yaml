@@ -48,7 +48,6 @@ services:
     build:
       context: ../agent
       dockerfile: Dockerfile
-    image: axyra-agent:latest
     restart: unless-stopped
     environment:
       POSTGRES_DSN: postgres://postgres:postgres@reference-db:5432/reference_db
@@ -97,7 +96,6 @@ services:
     build:
       context: ../services/control-plane
       dockerfile: Dockerfile
-    image: axyra-control-plane:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform
@@ -123,7 +121,6 @@ services:
     build:
       context: ../services/analytics
       dockerfile: Dockerfile
-    image: axyra-analytics:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform

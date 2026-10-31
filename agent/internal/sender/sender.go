@@ -158,3 +158,4 @@ func (s *Sender) Close() error {
 	<-s.done
 	return nil
 }
+

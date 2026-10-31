@@ -20,3 +20,4 @@ type Connector interface {
 	Start(ctx context.Context, out chan<- ChangeEvent) error
 	Close() error
 }
+
