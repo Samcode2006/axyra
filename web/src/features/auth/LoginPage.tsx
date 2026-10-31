@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { auth, errMsg } from '../../lib/api';
+import { ThemeToggle } from '../../components/ThemeToggle';
 
 export default function LoginPage() {
   const nav = useNavigate();
@@ -26,6 +27,7 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
+      <ThemeToggle className="login-theme-toggle" />
       <div className="login-card">
         <div className="login-brand">
           <span className="brand-logo">Ax</span>

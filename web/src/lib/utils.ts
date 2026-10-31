@@ -12,6 +12,24 @@ export function formatNumber(n: number) {
   return new Intl.NumberFormat('en-IN').format(n);
 }
 
+// Use English short notation so thousands/millions/billions display as K/M/B.
+export function formatCompactNumber(n: number) {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+export function formatCompactCurrency(amount: number, currency = 'INR') {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    currencyDisplay: 'narrowSymbol',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(amount);
+}
+
 export function formatDate(iso: string) {
   return new Date(iso).toLocaleString('en-IN', {
     day: '2-digit',

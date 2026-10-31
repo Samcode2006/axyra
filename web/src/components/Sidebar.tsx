@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { auth } from '../lib/api';
 import { cn } from '../lib/utils';
+import { ThemeToggle } from './ThemeToggle';
 
 interface NavEntry {
   to: string;
@@ -65,6 +66,7 @@ export function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-footer">
+        <ThemeToggle />
         {user && (
           <div className="sidebar-user">
             <span className="sidebar-user-name">{user.username}</span>

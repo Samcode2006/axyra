@@ -4,7 +4,7 @@ import { Badge } from '../../components/Badge';
 import { Spinner, ErrorMsg } from '../../components/Feedback';
 import { analytics, tenants, agents, errMsg } from '../../lib/api';
 import { useLoadEffect } from '../../lib/useLoadEffect';
-import { formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
+import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
 import type { Agent, CustomerSummary, RevenueBreakdown, Tenant, TenantAlert, TenantHealth } from '../../types';
 
 /** The analytics API is per tenant, so organization-wide figures fan out. Capped to bound the request count. */
@@ -101,15 +101,16 @@ export default function OverviewPage() {
       )}
 
       <div className="stat-grid">
-        <StatCard label="Gross revenue (7d)" value={formatCurrency(gross)} accent="green" />
-        <StatCard label="Net revenue (7d)" value={formatCurrency(net)} accent="green" sub="after discounts" />
-        <StatCard label="Avg order value (7d)" value={orders > 0 ? formatCurrency(gross / orders) : '—'} accent="blue" sub={`${formatNumber(orders)} orders`} />
-        <StatCard label="New customers (7d)" value={formatNumber(newCustomers)} accent="blue" />
-        <StatCard label="Active tenants" value={activeTenants} sub={`${tenantTotal} total`} accent="blue" />
+        <StatCard label="Gross revenue (7d)" value={formatCompactCurrency(gross)} fullValue={formatCurrency(gross)} accent="green" />
+        <StatCard label="Net revenue (7d)" value={formatCompactCurrency(net)} fullValue={formatCurrency(net)} accent="green" sub="after discounts" />
+        <StatCard label="Avg order value (7d)" value={orders > 0 ? formatCompactCurrency(gross / orders) : '—'} fullValue={orders > 0 ? formatCurrency(gross / orders) : undefined} accent="blue" sub={`${formatCompactNumber(orders)} orders`} />
+        <StatCard label="New customers (7d)" value={formatCompactNumber(newCustomers)} fullValue={formatNumber(newCustomers)} accent="blue" />
+        <StatCard label="Active tenants" value={formatCompactNumber(activeTenants)} fullValue={formatNumber(activeTenants)} sub={`${formatCompactNumber(tenantTotal)} total`} accent="blue" />
         <StatCard
           label="Connected agents"
-          value={connectedAgents}
-          sub={`${agentList.length} total`}
+          value={formatCompactNumber(connectedAgents)}
+          fullValue={formatNumber(connectedAgents)}
+          sub={`${formatCompactNumber(agentList.length)} total`}
           accent={connectedAgents > 0 ? 'green' : 'amber'}
         />
       </div>
@@ -119,8 +120,8 @@ export default function OverviewPage() {
           <h2 className="panel-title">Top tenant · last 24 hours</h2>
           <p style={{ fontSize: 18, fontWeight: 600 }}>
             {top.tenant.name}{' '}
-            <span className="hint">
-              {formatCurrency(top.health.revenue_24h)} from {formatNumber(top.health.orders_24h)} orders
+            <span className="hint" title={`${formatCurrency(top.health.revenue_24h)} from ${formatNumber(top.health.orders_24h)} orders`}>
+              {formatCompactCurrency(top.health.revenue_24h)} from {formatCompactNumber(top.health.orders_24h)} orders
             </span>
           </p>
         </section>

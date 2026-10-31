@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { analytics } from '../../../lib/api';
 import { Badge } from '../../../components/Badge';
 import { StatCard } from '../../../components/StatCard';
-import { formatCurrency, formatNumber, relativeTime } from '../../../lib/utils';
+import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime } from '../../../lib/utils';
 import { Bar, Empty, Panel } from './shared';
 import { maskId, type PanelScope } from './format';
 import { usePanel } from './usePanel';
+import { TrendLineChart } from './TrendLineChart';
 
 const key = (name: string, s: PanelScope, ...extra: Array<string | number>) =>
   [name, s.from, s.to, s.tenantId ?? '', ...extra].join('|');
@@ -21,18 +22,18 @@ export function CustomerSummaryPanel({ scope }: { scope: PanelScope }) {
     <Panel title="Customers" loading={p.loading} error={p.error} onRetry={p.reload}>
       {c && (
         <div className="stat-grid">
-          <StatCard label="Customers" value={formatNumber(c.total_customers)} accent="blue" sub="who ordered in this period" />
-          <StatCard label="New" value={formatNumber(c.new_customers)} accent="green" sub={`${c.new_customer_rate_pct}% of customers`} />
-          <StatCard label="Returning" value={formatNumber(c.returning_customers)} />
-          <StatCard label="Avg lifetime value" value={formatCurrency(c.avg_ltv)} accent="green" />
-          <StatCard label="Orders per customer" value={c.avg_orders_per_customer.toFixed(2)} />
+          <StatCard label="Customers" value={formatCompactNumber(c.total_customers)} fullValue={formatNumber(c.total_customers)} accent="blue" sub="who ordered in this period" />
+          <StatCard label="New" value={formatCompactNumber(c.new_customers)} fullValue={formatNumber(c.new_customers)} accent="green" sub={`${c.new_customer_rate_pct}% of customers`} />
+          <StatCard label="Returning" value={formatCompactNumber(c.returning_customers)} fullValue={formatNumber(c.returning_customers)} />
+          <StatCard label="Avg lifetime value" value={formatCompactCurrency(c.avg_ltv)} fullValue={formatCurrency(c.avg_ltv)} accent="green" />
+          <StatCard label="Orders per customer" value={Math.abs(c.avg_orders_per_customer) >= 1000 ? formatCompactNumber(c.avg_orders_per_customer) : c.avg_orders_per_customer.toFixed(2)} fullValue={c.avg_orders_per_customer.toFixed(2)} />
         </div>
       )}
     </Panel>
   );
 }
 
-/** Section B: new versus returning orders over time, as stacked bars. */
+/** Section B: new versus returning orders over time, as two lines. */
 export function CohortPanel({ scope }: { scope: PanelScope }) {
   const [interval, setInterval] = useState<'day' | 'week'>('day');
   const p = usePanel(
@@ -40,7 +41,7 @@ export function CohortPanel({ scope }: { scope: PanelScope }) {
     key('cohorts', scope, interval)
   );
   const pts = p.data ?? [];
-  const max = Math.max(...pts.map((x) => x.new_orders + x.returning_orders), 1);
+
 
   return (
     <Panel
@@ -61,32 +62,13 @@ export function CohortPanel({ scope }: { scope: PanelScope }) {
       {pts.length === 0 ? (
         <Empty />
       ) : (
-        <>
-          <div className="trend-chart">
-            {pts.map((pt) => {
-              const total = pt.new_orders + pt.returning_orders;
-              const h = Math.max(Math.round((total / max) * 100), 2);
-              const newShare = total > 0 ? (pt.new_orders / total) * 100 : 0;
-              return (
-                <div
-                  key={pt.bucket}
-                  className="trend-bar-wrap"
-                  title={`${pt.bucket}: ${pt.new_orders} new · ${pt.returning_orders} returning`}
-                >
-                  <div className="stack-bar" style={{ height: `${h}%` }}>
-                    <div style={{ height: `${100 - newShare}%`, background: 'var(--accent)' }} />
-                    <div style={{ height: `${newShare}%`, background: 'var(--blue)' }} />
-                  </div>
-                  <span className="trend-label">{pt.bucket.slice(5)}</span>
-                </div>
-              );
-            })}
-          </div>
-          <p className="hint">
-            <span className="legend-dot" style={{ background: 'var(--blue)' }} /> new customers&nbsp;&nbsp;
-            <span className="legend-dot" style={{ background: 'var(--accent)' }} /> returning customers
-          </p>
-        </>
+        <TrendLineChart
+          points={pts.map((pt) => ({ bucket: pt.bucket, value: pt.new_orders, secondary: pt.returning_orders }))}
+          label="New customer orders"
+          secondaryLabel="Returning customer orders"
+          interval={interval}
+          formatValue={formatNumber}
+        />
       )}
     </Panel>
   );

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { analytics } from '../../../lib/api';
 import { StatCard } from '../../../components/StatCard';
-import { formatCurrency, formatNumber } from '../../../lib/utils';
+import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber } from '../../../lib/utils';
 import { Bar, Empty, Panel } from './shared';
 import type { PanelScope } from './format';
 import { usePanel } from './usePanel';
@@ -158,8 +158,8 @@ export function ReturnsPanel({ scope }: { scope: PanelScope }) {
       {r && (
         <>
           <div className="stat-grid">
-            <StatCard label="Returns" value={formatNumber(r.total_returns)} accent={r.total_returns > 0 ? 'amber' : undefined} />
-            <StatCard label="Refunded" value={formatCurrency(r.total_refund_amount)} accent="red" />
+            <StatCard label="Returns" value={formatCompactNumber(r.total_returns)} fullValue={formatNumber(r.total_returns)} accent={r.total_returns > 0 ? 'amber' : undefined} />
+            <StatCard label="Refunded" value={formatCompactCurrency(r.total_refund_amount)} fullValue={formatCurrency(r.total_refund_amount)} accent="red" />
             <StatCard label="Return rate" value={`${r.return_rate_pct}%`} accent={r.return_rate_pct > 15 ? 'red' : undefined} />
           </div>
           {r.top_reasons.length === 0 ? (
@@ -195,9 +195,9 @@ export function DiscountsPanel({ scope }: { scope: PanelScope }) {
       {d && (
         <>
           <div className="stat-grid">
-            <StatCard label="Orders with a code" value={formatNumber(d.orders_with_discount)} accent="blue" sub={`${d.discount_rate_pct}% of orders`} />
-            <StatCard label="Discount given" value={formatCurrency(d.total_discount_given)} accent="amber" />
-            <StatCard label="Avg per discounted order" value={formatCurrency(d.avg_discount_per_order)} />
+            <StatCard label="Orders with a code" value={formatCompactNumber(d.orders_with_discount)} fullValue={formatNumber(d.orders_with_discount)} accent="blue" sub={`${d.discount_rate_pct}% of orders`} />
+            <StatCard label="Discount given" value={formatCompactCurrency(d.total_discount_given)} fullValue={formatCurrency(d.total_discount_given)} accent="amber" />
+            <StatCard label="Avg per discounted order" value={formatCompactCurrency(d.avg_discount_per_order)} fullValue={formatCurrency(d.avg_discount_per_order)} />
           </div>
           {d.top_codes.length === 0 ? (
             <Empty>No promo codes were used in this period.</Empty>

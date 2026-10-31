@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { analytics } from '../../../lib/api';
 import { StatCard } from '../../../components/StatCard';
-import { formatCurrency, formatNumber } from '../../../lib/utils';
+import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber } from '../../../lib/utils';
 import { Empty, Panel } from './shared';
 import type { PanelScope } from './format';
 import { usePanel } from './usePanel';
+import { TrendLineChart } from './TrendLineChart';
 
 const key = (name: string, s: PanelScope, ...extra: Array<string | number>) =>
   [name, s.from, s.to, s.tenantId ?? '', ...extra].join('|');
@@ -21,13 +22,13 @@ export function RevenueStrip({ scope }: { scope: PanelScope }) {
     <Panel title="Revenue breakdown" loading={p.loading} error={p.error} onRetry={p.reload}>
       {r && (
         <div className="stat-grid">
-          <StatCard label="Gross revenue" value={formatCurrency(r.gross_revenue, cur)} accent="green" />
-          <StatCard label="Discounts" value={formatCurrency(r.total_discount, cur)} accent="amber" />
-          <StatCard label="Net revenue" value={formatCurrency(r.net_revenue, cur)} accent="green" sub="gross less discounts" />
-          <StatCard label="Tax collected" value={formatCurrency(r.total_tax, cur)} />
-          <StatCard label="Shipping" value={formatCurrency(r.total_shipping, cur)} />
-          <StatCard label="Avg order value" value={formatCurrency(r.avg_order_value, cur)} accent="blue" sub={`${formatNumber(r.active_orders)} orders`} />
-          <StatCard label="Units sold" value={formatNumber(r.total_quantity)} />
+          <StatCard label="Gross revenue" value={formatCompactCurrency(r.gross_revenue, cur)} fullValue={formatCurrency(r.gross_revenue, cur)} accent="green" />
+          <StatCard label="Discounts" value={formatCompactCurrency(r.total_discount, cur)} fullValue={formatCurrency(r.total_discount, cur)} accent="amber" />
+          <StatCard label="Net revenue" value={formatCompactCurrency(r.net_revenue, cur)} fullValue={formatCurrency(r.net_revenue, cur)} accent="green" sub="gross less discounts" />
+          <StatCard label="Tax collected" value={formatCompactCurrency(r.total_tax, cur)} fullValue={formatCurrency(r.total_tax, cur)} />
+          <StatCard label="Shipping" value={formatCompactCurrency(r.total_shipping, cur)} fullValue={formatCurrency(r.total_shipping, cur)} />
+          <StatCard label="Avg order value" value={formatCompactCurrency(r.avg_order_value, cur)} fullValue={formatCurrency(r.avg_order_value, cur)} accent="blue" sub={`${formatCompactNumber(r.active_orders)} orders`} />
+          <StatCard label="Units sold" value={formatCompactNumber(r.total_quantity)} fullValue={formatNumber(r.total_quantity)} />
         </div>
       )}
     </Panel>
@@ -53,7 +54,6 @@ export function TrendPanel({ scope, interval }: { scope: PanelScope; interval: '
   );
   const pts = p.data?.data ?? [];
   const meta = SERIES.find((s) => s.id === series)!;
-  const max = Math.max(...pts.map((x) => x[series]), 1);
   const fmt = (v: number) => (meta.money ? formatCurrency(v) : formatNumber(v));
 
   return (
@@ -75,23 +75,7 @@ export function TrendPanel({ scope, interval }: { scope: PanelScope; interval: '
       {pts.length === 0 ? (
         <Empty>No trend data for this period.</Empty>
       ) : (
-        <div className="trend-chart">
-          {pts.map((pt) => {
-            const v = pt[series];
-            const pct = Math.max(Math.round((v / max) * 100), 2);
-            const d = new Date(pt.bucket);
-            const label =
-              interval === 'day'
-                ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })
-                : d.toLocaleTimeString('en-IN', { hour: '2-digit', timeZone: 'UTC' });
-            return (
-              <div key={pt.bucket} className="trend-bar-wrap" title={`${label}: ${fmt(v)}`}>
-                <div className="trend-bar" style={{ height: `${pct}%` }} />
-                <span className="trend-label">{label}</span>
-              </div>
-            );
-          })}
-        </div>
+        <TrendLineChart points={pts.map((pt) => ({ bucket: pt.bucket, value: pt[series] }))} label={meta.label} interval={interval} formatValue={fmt} />
       )}
     </Panel>
   );

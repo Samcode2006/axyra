@@ -203,10 +203,13 @@ func (db *DB) InsertDeadLetter(ctx context.Context, agentID, tenantID, eventID, 
 	return err
 }
 
-// GetAgentCursor returns the last confirmed LSN for an agent, or "0/0" if none.
-func (db *DB) GetAgentCursor(agentID string) (string, error) {
+// GetAgentCursor returns the last confirmed LSN for an agent source, or "0/0" if none.
+func (db *DB) GetAgentCursor(agentID, source string) (string, error) {
+	if source == "" {
+		source = "default"
+	}
 	var lsn string
-	err := db.QueryRow(`SELECT confirmed_lsn FROM agent_cursors WHERE agent_id = $1`, agentID).Scan(&lsn)
+	err := db.QueryRow(`SELECT confirmed_lsn FROM agent_cursors WHERE agent_id = $1 AND source = $2`, agentID, source).Scan(&lsn)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return "0/0", nil
@@ -216,15 +219,18 @@ func (db *DB) GetAgentCursor(agentID string) (string, error) {
 	return lsn, nil
 }
 
-// UpsertAgentCursor persists the last confirmed LSN so the agent can resume after restart.
-func (db *DB) UpsertAgentCursor(ctx context.Context, agentID, confirmedLSN string) error {
+// UpsertAgentCursor persists a source-specific LSN so the agent can resume that WAL stream.
+func (db *DB) UpsertAgentCursor(ctx context.Context, agentID, source, confirmedLSN string) error {
+	if source == "" {
+		source = "default"
+	}
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO agent_cursors (agent_id, confirmed_lsn, updated_at)
-		VALUES ($1, $2, NOW())
-		ON CONFLICT (agent_id) DO UPDATE SET
+		INSERT INTO agent_cursors (agent_id, source, confirmed_lsn, updated_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (agent_id, source) DO UPDATE SET
 			confirmed_lsn = EXCLUDED.confirmed_lsn,
 			updated_at = NOW()
-	`, agentID, confirmedLSN)
+	`, agentID, source, confirmedLSN)
 	return err
 }
 

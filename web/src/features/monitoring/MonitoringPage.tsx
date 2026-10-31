@@ -212,7 +212,7 @@ export default function MonitoringPage() {
           )}
         </div>
         {deadLetters.length === 0 ? (
-          <p className="empty-state" style={{ padding: '20px 0' }}>No failed events. 🎉</p>
+          <p className="empty-state" style={{ padding: '20px 0' }}>No failed events.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="table">

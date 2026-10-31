@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { analytics, tenants as tenantsApi } from '../../lib/api';
 import { StatCard } from '../../components/StatCard';
-import { formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
+import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
 import type { AnalyticsStatus, BreakdownGroup, Tenant } from '../../types';
 import { CohortPanel, ChannelPanel, CustomerSummaryPanel, GeoPanel, TopBuyersPanel } from './panels/CustomerPanels';
 import { RevenueStrip, TrendPanel } from './panels/FinancialPanels';
@@ -29,13 +29,18 @@ const BREAKDOWNS: Array<{ id: BreakdownGroup; label: string }> = [
 ];
 
 export default function AnalyticsPage() {
-  const [days, setDays] = useState<1 | 7 | 30>(7);
+  const [days, setDays] = useState<1 | 7 | 30 | 'custom'>(7);
+  const [customFrom, setCustomFrom] = useState(() => utcDayRange(7).from.slice(0, 10));
+  const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [appliedRange, setAppliedRange] = useState(() => utcDayRange(7));
   const [interval, setInterval] = useState<'hour' | 'day'>('day');
   const [tenantId, setTenantId] = useState<string>('');
   const [tenantList, setTenantList] = useState<Tenant[]>([]);
 
   // Whole UTC days, so the hourly and daily panels agree on where a range starts.
-  const range = useMemo(() => utcDayRange(days), [days]);
+  const range = useMemo(() => days === 'custom' ? appliedRange : utcDayRange(days), [days, appliedRange]);
+  const customValid = Boolean(customFrom && customTo && customFrom <= customTo
+    && Number.isFinite(Date.parse(customFrom)) && Number.isFinite(Date.parse(customTo)));
 
   useEffect(() => {
     tenantsApi
@@ -72,14 +77,33 @@ export default function AnalyticsPage() {
               {r.label}
             </button>
           ))}
+          <button className={`btn btn--sm ${days === 'custom' ? 'btn--active' : ''}`} aria-pressed={days === 'custom'} onClick={() => {
+            setCustomFrom(range.from.slice(0, 10));
+            setCustomTo(range.to.slice(0, 10));
+            setAppliedRange(range);
+            setDays('custom');
+          }}>Custom</button>
           <span className="control-label">Interval:</span>
           {(['hour', 'day'] as const).map((i) => (
             <button key={i} className={`btn btn--sm ${interval === i ? 'btn--active' : ''}`} onClick={() => setInterval(i)}>
-              {i}
+              {i === 'hour' ? 'Hourly' : 'Daily'}
             </button>
           ))}
         </div>
       </div>
+
+      {days === 'custom' && (
+        <form className="controls custom-date-range" onSubmit={(event) => {
+          event.preventDefault();
+          if (customValid) setAppliedRange({ from: `${customFrom}T00:00:00.000Z`, to: `${customTo}T23:59:59.999Z` });
+        }}>
+          <label>From <input className="select-sm" type="date" required value={customFrom} max={customTo || undefined} onChange={(event) => setCustomFrom(event.target.value)} /></label>
+          <label>To <input className="select-sm" type="date" required value={customTo} min={customFrom || undefined} onChange={(event) => setCustomTo(event.target.value)} /></label>
+          <button className="btn btn--sm" type="submit" disabled={!customValid}>Apply dates</button>
+          {!customValid && <span role="alert" className="hint">Choose valid dates with the end on or after the start.</span>}
+          <span className="hint">Showing {range.from.slice(0, 10)} to {range.to.slice(0, 10)} (UTC)</span>
+        </form>
+      )}
 
       <p className="hint">Ranges cover whole UTC days. Customer, geography, payment and return figures are by the day an order was created.</p>
 
@@ -150,16 +174,16 @@ function FreshnessAndSummary({ scope }: { scope: PanelScope }) {
           Last event: <strong>{relativeTime(f.last_processed_at)}</strong>
           &nbsp;·&nbsp; Age: <strong>{f.lag_seconds.toFixed(0)}s</strong>
           &nbsp;·&nbsp; LSN: <code>{f.last_lsn}</code>
-          {!f.is_healthy && <strong>&nbsp;·&nbsp; ⚠ No events for over 5 minutes</strong>}
+          {!f.is_healthy && <strong>&nbsp;·&nbsp; No events for over 5 minutes</strong>}
         </div>
       )}
       <Panel title="Summary" loading={summary.loading} error={summary.error} onRetry={summary.reload}>
         {s && (
           <div className="stat-grid">
-            <StatCard label="Total orders" value={formatNumber(s.total_orders)} accent="blue" />
-            <StatCard label="Revenue" value={formatCurrency(s.total_revenue, s.currency)} accent="green" />
-            <StatCard label="Active orders" value={formatNumber(s.active_orders)} />
-            <StatCard label="Cancelled" value={`${formatNumber(s.cancelled_orders)} (${cancelRate}%)`} accent="red" />
+            <StatCard label="Total orders" value={formatCompactNumber(s.total_orders)} fullValue={formatNumber(s.total_orders)} accent="blue" />
+            <StatCard label="Revenue" value={formatCompactCurrency(s.total_revenue, s.currency)} fullValue={formatCurrency(s.total_revenue, s.currency)} accent="green" />
+            <StatCard label="Active orders" value={formatCompactNumber(s.active_orders)} fullValue={formatNumber(s.active_orders)} />
+            <StatCard label="Cancelled" value={formatCompactNumber(s.cancelled_orders)} fullValue={formatNumber(s.cancelled_orders)} sub={`${cancelRate}% of orders`} accent="red" />
           </div>
         )}
       </Panel>

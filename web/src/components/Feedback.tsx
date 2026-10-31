@@ -9,7 +9,7 @@ export function Spinner({ size = 20 }: { size?: number }) {
 }
 
 export function ErrorMsg({ message }: { message: string }) {
-  return <div className="error-msg">⚠ {message}</div>;
+  return <div className="error-msg">{message}</div>;
 }
 
 export function EmptyState({ message }: { message: string }) {

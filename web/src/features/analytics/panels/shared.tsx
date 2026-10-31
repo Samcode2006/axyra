@@ -20,7 +20,7 @@ export function Panel({ title, loading, error, onRetry, actions, children }: Pan
       </div>
       {error ? (
         <div className="error-msg">
-          ⚠ {error}{' '}
+          {error}{' '}
           {onRetry && (
             <button className="btn btn--sm" onClick={onRetry}>
               Retry
