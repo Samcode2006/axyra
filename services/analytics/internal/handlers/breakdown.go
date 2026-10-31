@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/axyra/analytics/internal/models"
 )
@@ -10,29 +11,80 @@ import (
 func (h *Handler) OrderBreakdown(w http.ResponseWriter, r *http.Request) {
 	tenantID := h.resolveRequestTenant(r)
 
+	done, ok := h.acquireQuery(w, r, tenantID, "orders.breakdown")
+	if !ok {
+		return
+	}
+	defer done()
+
 	groupBy := r.URL.Query().Get("group_by")
 	if groupBy != "category" && groupBy != "status" {
 		groupBy = "status"
 	}
 
-	query := `
-		SELECT status AS grp, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS rev
-		FROM order_state
-		WHERE tenant_id = $1
-		GROUP BY status
-		ORDER BY cnt DESC
-	`
-	if groupBy == "category" {
-		query = `
-			SELECT category AS grp, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS rev
-			FROM order_state
-			WHERE tenant_id = $1
-			GROUP BY category
-			ORDER BY cnt DESC
-		`
+	// Parse optional time range; when absent, report across all order_state rows.
+	now := time.Now().UTC()
+	fromTime := now.Add(-7 * 24 * time.Hour)
+	toTime := now
+	hasRange := false
+
+	if f := r.URL.Query().Get("from"); f != "" {
+		if t, err := time.Parse(time.RFC3339, f); err == nil {
+			fromTime = t.UTC()
+			hasRange = true
+		}
+	}
+	if ts := r.URL.Query().Get("to"); ts != "" {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			toTime = t.UTC()
+		}
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), query, tenantID)
+	var query string
+	var args []interface{}
+
+	if hasRange {
+		if groupBy == "status" {
+			query = `
+				SELECT status AS grp, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS rev
+				FROM order_state
+				WHERE tenant_id = $1
+				  AND occurred_at >= $2
+				  AND occurred_at <= $3
+				GROUP BY status
+				ORDER BY cnt DESC`
+		} else {
+			query = `
+				SELECT category AS grp, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS rev
+				FROM order_state
+				WHERE tenant_id = $1
+				  AND occurred_at >= $2
+				  AND occurred_at <= $3
+				GROUP BY category
+				ORDER BY cnt DESC`
+		}
+		args = []interface{}{tenantID, fromTime, toTime}
+	} else {
+		// No date range: query full order_state
+		if groupBy == "status" {
+			query = `
+				SELECT status AS grp, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS rev
+				FROM order_state
+				WHERE tenant_id = $1
+				GROUP BY status
+				ORDER BY cnt DESC`
+		} else {
+			query = `
+				SELECT category AS grp, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS rev
+				FROM order_state
+				WHERE tenant_id = $1
+				GROUP BY category
+				ORDER BY cnt DESC`
+		}
+		args = []interface{}{tenantID}
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
 		return
@@ -48,6 +100,10 @@ func (h *Handler) OrderBreakdown(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, item)
 	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Row error: %v", err))
+		return
+	}
 
 	respondJSON(w, http.StatusOK, models.BreakdownResponse{
 		TenantID: tenantID,
@@ -55,4 +111,3 @@ func (h *Handler) OrderBreakdown(w http.ResponseWriter, r *http.Request) {
 		Data:     items,
 	})
 }
-

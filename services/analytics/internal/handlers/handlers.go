@@ -4,28 +4,49 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/axyra/analytics/internal/config"
 	"github.com/axyra/analytics/internal/db"
+	"github.com/axyra/analytics/internal/limiter"
 	"github.com/axyra/analytics/internal/queue"
 )
 
 type Handler struct {
-	db    *db.DB
-	queue queue.Queue
-	cfg   *config.Config
+	db      *db.DB
+	queue   queue.Queue
+	cfg     *config.Config
+	limiter *limiter.Limiter
 }
 
 func New(database *db.DB, q queue.Queue, cfg *config.Config) *Handler {
 	return &Handler{
-		db:    database,
-		queue: q,
-		cfg:   cfg,
+		db:      database,
+		queue:   q,
+		cfg:     cfg,
+		limiter: limiter.New(cfg.MaxConcurrentQueries),
 	}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "analytics"})
+}
+
+// acquireQuery tries to acquire a concurrency slot for the tenant (B-3) and
+// records query latency when the returned done function is called (B-5).
+// If the limit is exceeded it writes 429 and returns ok=false.
+func (h *Handler) acquireQuery(w http.ResponseWriter, r *http.Request, tenantID, endpoint string) (done func(), ok bool) {
+	capacity := h.db.GetTenantMaxConcurrency(tenantID)
+	if err := h.limiter.Acquire(tenantID, capacity); err != nil {
+		respondError(w, http.StatusTooManyRequests, err.Error())
+		return nil, false
+	}
+	start := time.Now()
+	return func() {
+		h.limiter.Release(tenantID)
+		ms := time.Since(start).Milliseconds()
+		h.db.RecordQueryLatency(r.Context(), tenantID, endpoint, ms)
+	}, true
 }
 
 // resolveRequestTenant extracts and resolves tenant_id from request query/header or default.

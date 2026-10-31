@@ -12,6 +12,12 @@ import (
 func (h *Handler) OrderSummary(w http.ResponseWriter, r *http.Request) {
 	tenantID := h.resolveRequestTenant(r)
 
+	done, ok := h.acquireQuery(w, r, tenantID, "orders.summary")
+	if !ok {
+		return
+	}
+	defer done()
+
 	now := time.Now().UTC()
 	fromTime := now.Add(-7 * 24 * time.Hour)
 	toTime := now

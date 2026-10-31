@@ -11,6 +11,12 @@ import (
 func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 	tenantID := h.resolveRequestTenant(r)
 
+	done, ok := h.acquireQuery(w, r, tenantID, "orders.trend")
+	if !ok {
+		return
+	}
+	defer done()
+
 	interval := r.URL.Query().Get("interval")
 	if interval != "hour" && interval != "day" {
 		interval = "day"

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 
 	"github.com/axyra/control-plane/internal/auth"
 )
@@ -28,6 +29,17 @@ func (h *Handler) AnalyticsProxy() http.HandlerFunc {
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = targetURL.Host
+	}
+	// The control plane's CORS middleware already answers for every route. The
+	// analytics service adds its own CORS headers, and a response carrying the
+	// header twice is rejected by browsers, so drop the upstream's.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		for name := range resp.Header {
+			if strings.HasPrefix(http.CanonicalHeaderKey(name), "Access-Control-") {
+				resp.Header.Del(name)
+			}
+		}
+		return nil
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {

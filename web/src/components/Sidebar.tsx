@@ -76,7 +76,7 @@ export function Sidebar() {
             </button>
           </div>
         )}
-        <span className="version">v0.2.0-phase2</span>
+        <span className="version">v0.3.0-phase5</span>
       </div>
     </aside>
   );

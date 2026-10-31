@@ -6,9 +6,11 @@ import type {
   Application,
   AuditLogPage,
   BreakdownResponse,
+  DeadLetterEvent,
   IssuedToken,
   MetricConfig,
   MetricDefinition,
+  MonitoringStats,
   OrderSummary,
   Organization,
   PaginatedResponse,
@@ -177,7 +179,21 @@ export const analytics = {
   breakdown: (params: { group_by: 'status' | 'category'; from: string; to: string }) =>
     http.get<BreakdownResponse>('/v1/analytics/orders/breakdown', { params }),
 
-  status: () => http.get<AnalyticsStatus>('/v1/analytics/status'),
+  status: (params?: { tenant_id?: string }) =>
+    http.get<AnalyticsStatus>('/v1/analytics/status', { params }),
+
+  deadLetter: (params?: { agent_id?: string; limit?: number }) =>
+    http.get<DeadLetterEvent[]>('/v1/analytics/dead-letter', { params }),
+
+  monitoring: () =>
+    http.get<MonitoringStats>('/v1/analytics/monitoring'),
+
+  rebuild: (params?: { tenant_id?: string }) =>
+    http.post<{ tenant_id: string; events_replayed: number; duration_ms: number }>(
+      '/v1/analytics/rebuild',
+      null,
+      { params }
+    ),
 };
 
 // ─── Policies ────────────────────────────────────────────────────────────────

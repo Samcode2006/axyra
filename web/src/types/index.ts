@@ -136,6 +136,19 @@ export interface AnalyticsStatus {
   is_healthy: boolean;
 }
 
+export interface DeadLetterEvent {
+  id: number;
+  agent_id: string;
+  tenant_id: string;
+  event_id: string;
+  lsn: string;
+  reason: string;
+  payload?: unknown;
+  retry_count: number;
+  replayed_at?: string;
+  created_at: string;
+}
+
 // ─── Access & Policies ───────────────────────────────────────────────────────
 
 export type PolicyType = 'rate_limit' | 'query_limit' | 'data_access';
@@ -228,3 +241,20 @@ export interface AuditLogPage {
   data: AuditLog[];
   next_before_id?: number;
 }
+
+// ─── Monitoring (B-5) ─────────────────────────────────────────────────────────
+
+export interface MonitoringStats {
+  queue_depth: number;
+  events_last_60s: number;
+  events_last_5m: number;
+  last_processed_at?: string;
+  worker_healthy: boolean;
+  dead_letter_count: number;
+  processed_last_5m: number;
+  latency_p50_ms?: number;
+  latency_p95_ms?: number;
+  latency_p99_ms?: number;
+  latency_sample_count: number;
+}
+

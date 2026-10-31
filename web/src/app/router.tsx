@@ -9,15 +9,8 @@ import ApplicationsPage from '../features/applications/ApplicationsPage';
 import AnalyticsPage from '../features/analytics/AnalyticsPage';
 import AccessPoliciesPage from '../features/access-policies/AccessPoliciesPage';
 import MetricConfigPage from '../features/metric-config/MetricConfigPage';
+import MonitoringPage from '../features/monitoring/MonitoringPage';
 import PlatformOperationsPage from '../features/platform-operations/PlatformOperationsPage';
-
-// Monitoring arrives in Phase 5.
-const DevAPlaceholder = ({ name }: { name: string }) => (
-  <div className="page">
-    <div className="page-header"><h1>{name}</h1></div>
-    <div className="panel"><p style={{ opacity: 0.6 }}>Coming in a later phase.</p></div>
-  </div>
-);
 
 export function AppRouter() {
   return (
@@ -36,6 +29,7 @@ export function AppRouter() {
           <Route path="applications" element={<ApplicationsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="access-policies" element={<AccessPoliciesPage />} />
+          <Route path="monitoring" element={<MonitoringPage />} />
           <Route path="metric-config" element={<MetricConfigPage />} />
           <Route
             path="platform-operations"
@@ -45,7 +39,6 @@ export function AppRouter() {
               </RequireOperator>
             }
           />
-          <Route path="monitoring" element={<DevAPlaceholder name="Monitoring" />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

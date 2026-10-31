@@ -73,7 +73,8 @@ func (h *Handler) Routes() http.Handler {
 
 		r.Get("/v1/audit-logs", h.ListAuditLogs)
 
-		// Dashboard analytics are proxied so the web app needs only one origin.
+		// Dashboard analytics (including dead-letter inspection) are proxied
+		// so the web app needs only one origin.
 		r.HandleFunc("/v1/analytics/*", h.AnalyticsProxy())
 	})
 

@@ -70,6 +70,17 @@ func main() {
 	// Dead-letter inspection endpoint
 	r.Get("/v1/analytics/dead-letter", h.ListDeadLetterEvents)
 
+
+	// B-5: Platform monitoring endpoint
+	r.Get("/v1/analytics/monitoring", h.MonitoringHandler)
+
+	// B-2: Aggregate rebuild endpoint
+	r.Post("/v1/analytics/rebuild", h.Rebuild)
+
+	// B-4: Config-driven metric query endpoint
+	r.Get("/v1/analytics/metrics/{metric_id}", h.QueryMetric)
+
+
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: r,

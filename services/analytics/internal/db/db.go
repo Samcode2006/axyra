@@ -160,3 +160,24 @@ func (db *DB) UpsertAgentCursor(ctx context.Context, agentID, confirmedLSN strin
 	`, agentID, confirmedLSN)
 	return err
 }
+
+// RecordQueryLatency persists one query observation for the monitoring page.
+// It is best-effort: failures are logged but never returned to the caller.
+func (db *DB) RecordQueryLatency(ctx context.Context, tenantID, endpoint string, durationMs int64) {
+	_, _ = db.ExecContext(ctx,
+		`INSERT INTO op_query_latency (tenant_id, endpoint, duration_ms) VALUES ($1, $2, $3)`,
+		tenantID, endpoint, durationMs)
+}
+
+// GetTenantMaxConcurrency returns the max_concurrent_queries quota for a tenant,
+// or 0 if no quota is set (meaning unlimited).
+func (db *DB) GetTenantMaxConcurrency(tenantID string) int {
+	var n int
+	err := db.QueryRow(`
+		SELECT COALESCE((quota->>'max_concurrent_queries')::int, 0)
+		FROM tenants WHERE id = $1`, tenantID).Scan(&n)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}

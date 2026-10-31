@@ -99,6 +99,17 @@ CREATE TABLE IF NOT EXISTS dead_letter_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Operational measurements for the monitoring page (B-5).
+-- Each row is one query observation; the monitoring endpoint aggregates over
+-- the last N minutes. Rows older than 24h can be pruned.
+CREATE TABLE IF NOT EXISTS op_query_latency (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    endpoint VARCHAR(128) NOT NULL,
+    duration_ms INT NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_raw_events_tenant_time ON raw_events(tenant_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_raw_events_agent_lsn ON raw_events(agent_id, lsn);
 CREATE INDEX IF NOT EXISTS idx_order_state_tenant_status ON order_state(tenant_id, status);
@@ -106,3 +117,4 @@ CREATE INDEX IF NOT EXISTS idx_order_summary_hourly_time ON order_summary_hourly
 CREATE INDEX IF NOT EXISTS idx_order_summary_daily_time ON order_summary_daily(tenant_id, bucket);
 CREATE INDEX IF NOT EXISTS idx_product_aggregates_top ON product_aggregates(tenant_id, total_revenue DESC);
 CREATE INDEX IF NOT EXISTS idx_dead_letter_agent ON dead_letter_events(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_op_query_latency_time ON op_query_latency(recorded_at DESC);

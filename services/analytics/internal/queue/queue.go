@@ -85,6 +85,11 @@ func (q *RedisQueue) Close() error {
 	return q.client.Close()
 }
 
+// Depth returns the number of items currently waiting in the queue.
+func (q *RedisQueue) Depth(ctx context.Context) (int64, error) {
+	return q.client.LLen(ctx, q.queueKey).Result()
+}
+
 // MemoryQueue provides in-memory fallback for local testing
 type MemoryQueue struct {
 	ch   chan models.EventEnvelope
