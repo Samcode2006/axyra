@@ -125,7 +125,7 @@ export default function AnalyticsPage({ organization = false }: { organization?:
 
           <h2 className="section-title">Revenue &amp; financials</h2>
           <RevenueStrip scope={scope} />
-          <TrendPanel scope={scope} interval={interval} />
+          <TrendPanel scope={scope} interval={interval} tenants={organization ? tenantList : undefined} />
 
           <h2 className="section-title">Customers</h2>
           <CustomerSummaryPanel scope={scope} />

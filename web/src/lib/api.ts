@@ -212,7 +212,7 @@ export const analytics = {
   summary: (params: { from: string; to: string; tenant_id?: string }) =>
     http.get<OrderSummary>('/v1/analytics/orders/summary', { params: dashboardParams(params) }),
 
-  trend: (params: { interval: 'hour' | 'day'; from: string; to: string; tenant_id?: string }) =>
+  trend: (params: { interval: 'hour' | 'day'; from: string; to: string; tenant_id?: string; group_by?: 'tenant' }) =>
     http.get<TrendResponse>('/v1/analytics/orders/trend', { params: dashboardParams(params) }),
 
   topProducts: (params: {

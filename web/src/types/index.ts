@@ -101,6 +101,7 @@ export interface OrderSummary {
 }
 
 export interface TrendPoint {
+  tenant_id?: string; // Present when the trend is grouped by tenant.
   bucket: string; // ISO timestamp
   order_count: number;
   revenue: number;

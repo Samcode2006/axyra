@@ -4,6 +4,7 @@ import type { PanelScope } from './format';
 import { compactMetricValue, metricRows, metricValue, visibleMetrics } from './metricResults';
 import { Empty, Panel } from './shared';
 import { usePanel } from './usePanel';
+import './configuredMetrics.css';
 
 export function ConfiguredMetrics({ scope, organizationId }: { scope: PanelScope; organizationId?: string }) {
   const definitions = usePanel(
@@ -44,9 +45,7 @@ function ConfiguredMetric({ metric, scope }: { metric: MetricDefinition; scope: 
     : `${label(metric.config.aggregation)} of ${label(metric.config.field ?? 'amount')}`;
 
   return (
-    <Panel title={metric.name} loading={data.loading} error={data.error} onRetry={data.reload}>
-      {metric.description && <p className="hint">{metric.description}</p>}
-      <p className="hint">{definition}{groups.length > 0 ? ` by ${groups.map(label).join(', ')}` : ''}</p>
+    <Panel className={`configured-metric configured-metric--${metric.config.aggregation}`} title={metric.name} loading={data.loading} error={data.error} onRetry={data.reload}>
       {!data.loading && data.data && (
         rows.length === 0 ? <Empty /> : groups.length === 0 ? (
           <div className="stat-value" title={metricValue(valueColumn ? rows[0][valueColumn] : null)}>
@@ -68,6 +67,8 @@ function ConfiguredMetric({ metric, scope }: { metric: MetricDefinition; scope: 
           </div>
         )
       )}
+      <p className="stat-sub">{definition}{groups.length > 0 ? ` by ${groups.map(label).join(', ')}` : ''}</p>
+      {metric.description && <p className="stat-sub">{metric.description}</p>}
     </Panel>
   );
 }

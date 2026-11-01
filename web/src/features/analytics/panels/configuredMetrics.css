@@ -1,0 +1,21 @@
+/* Use the same surface, spacing, typography and left accent as StatCard. */
+.panel.configured-metric {
+  --metric-color: var(--brand);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--metric-color);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+
+.panel.configured-metric--sum { --metric-color: var(--green); }
+.panel.configured-metric--avg,
+.panel.configured-metric--max { --metric-color: var(--amber); }
+.panel.configured-metric--min { --metric-color: var(--red); }
+
+.configured-metric .panel-head { margin-bottom: 8px; }
+.configured-metric .panel-title {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}

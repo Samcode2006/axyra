@@ -38,15 +38,21 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	trendPoints := make([]models.TrendPoint, 0)
+	// The organization scope is still enforced by analytics_scope_tenants.
+	// All SQL fragments here are fixed identifiers, never caller-provided SQL.
+	tenantColumn, grouping := "''::text", "bucket"
+	if r.URL.Query().Get("group_by") == "tenant" {
+		tenantColumn, grouping = "tenant_id", "bucket, tenant_id"
+	}
 
 	if interval == "hour" {
-		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT bucket, SUM(total_orders)::bigint, SUM(total_revenue), SUM(total_discount), SUM(new_customer_orders)::bigint
+		rows, err := h.db.QueryContext(r.Context(), fmt.Sprintf(`
+			SELECT %s, bucket, SUM(total_orders)::bigint, SUM(total_revenue), SUM(total_discount), SUM(new_customer_orders)::bigint
 			FROM order_summary_hourly
 			WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2 AND bucket <= $3
-			GROUP BY bucket
-            ORDER BY bucket ASC
-		`, tenantID, fromTime.Truncate(time.Hour), toTime)
+			GROUP BY %s
+            ORDER BY %s
+		`, tenantColumn, grouping, grouping), tenantID, fromTime.Truncate(time.Hour), toTime)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
 			return
@@ -55,20 +61,24 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 
 		for rows.Next() {
 			var p models.TrendPoint
-			if err := rows.Scan(&p.Bucket, &p.OrderCount, &p.Revenue, &p.Discount, &p.NewCustomers); err != nil {
+			if err := rows.Scan(&p.TenantID, &p.Bucket, &p.OrderCount, &p.Revenue, &p.Discount, &p.NewCustomers); err != nil {
 				respondError(w, http.StatusInternalServerError, fmt.Sprintf("Scan error: %v", err))
 				return
 			}
 			trendPoints = append(trendPoints, p)
 		}
+		if err := rows.Err(); err != nil {
+			respondError(w, http.StatusInternalServerError, "Could not read trend data")
+			return
+		}
 	} else {
-		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT bucket, SUM(total_orders)::bigint, SUM(total_revenue), SUM(total_discount), SUM(new_customer_orders)::bigint
+		rows, err := h.db.QueryContext(r.Context(), fmt.Sprintf(`
+			SELECT %s, bucket, SUM(total_orders)::bigint, SUM(total_revenue), SUM(total_discount), SUM(new_customer_orders)::bigint
 			FROM order_summary_daily
 			WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket <= $3::date
-			GROUP BY bucket
-            ORDER BY bucket ASC
-		`, tenantID, fromTime.Format("2006-01-02"), toTime.Format("2006-01-02"))
+			GROUP BY %s
+            ORDER BY %s
+		`, tenantColumn, grouping, grouping), tenantID, fromTime.Format("2006-01-02"), toTime.Format("2006-01-02"))
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
 			return
@@ -78,7 +88,7 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var p models.TrendPoint
 			var dateStr string
-			if err := rows.Scan(&dateStr, &p.OrderCount, &p.Revenue, &p.Discount, &p.NewCustomers); err != nil {
+			if err := rows.Scan(&p.TenantID, &dateStr, &p.OrderCount, &p.Revenue, &p.Discount, &p.NewCustomers); err != nil {
 				respondError(w, http.StatusInternalServerError, fmt.Sprintf("Scan error: %v", err))
 				return
 			}
@@ -86,6 +96,10 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 				p.Bucket = t
 			}
 			trendPoints = append(trendPoints, p)
+		}
+		if err := rows.Err(); err != nil {
+			respondError(w, http.StatusInternalServerError, "Could not read trend data")
+			return
 		}
 	}
 

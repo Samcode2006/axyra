@@ -38,6 +38,7 @@ type OrderSummary struct {
 }
 
 type TrendPoint struct {
+	TenantID   string    `json:"tenant_id,omitempty"`
 	Bucket     time.Time `json:"bucket"`
 	OrderCount int64     `json:"order_count"`
 	Revenue    float64   `json:"revenue"`

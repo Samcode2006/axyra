@@ -6,6 +6,8 @@ import { Empty, Panel } from './shared';
 import type { PanelScope } from './format';
 import { usePanel } from './usePanel';
 import { TrendLineChart } from './TrendLineChart';
+import type { Tenant } from '../../../types';
+import { tenantTrendLines, tenantTrendOptions } from './tenantTrends';
 
 const key = (name: string, s: PanelScope, ...extra: Array<string | number>) =>
   [name, s.from, s.to, s.tenantId ?? '', ...extra].join('|');
@@ -46,15 +48,20 @@ const SERIES: Array<{ id: Series; label: string; money: boolean }> = [
 ];
 
 /** Section A: the trend chart, with a choice of series. */
-export function TrendPanel({ scope, interval }: { scope: PanelScope; interval: 'hour' | 'day' }) {
+export function TrendPanel({ scope, interval, tenants }: { scope: PanelScope; interval: 'hour' | 'day'; tenants?: Tenant[] }) {
   const [series, setSeries] = useState<Series>('order_count');
+  const [selectedTenant, setSelectedTenant] = useState('');
+  const byTenant = tenants !== undefined;
   const p = usePanel(
-    () => analytics.trend({ interval, from: scope.from, to: scope.to, tenant_id: scope.tenantId }).then((r) => r.data),
-    key('trend', scope, interval)
+    () => analytics.trend({ interval, from: scope.from, to: scope.to, tenant_id: scope.tenantId, group_by: byTenant ? 'tenant' : undefined }).then((r) => r.data),
+    key('trend', scope, interval, byTenant ? 'tenant' : 'combined')
   );
   const pts = p.data?.data ?? [];
   const meta = SERIES.find((s) => s.id === series)!;
   const fmt = (v: number) => (meta.money ? formatCurrency(v) : formatNumber(v));
+  const options = tenantTrendOptions(tenants ?? [], pts);
+  const selected = options.some((option) => option.id === selectedTenant) ? selectedTenant : '';
+  const lines = byTenant ? tenantTrendLines(options, pts, series, selected) : undefined;
 
   return (
     <Panel
@@ -64,6 +71,10 @@ export function TrendPanel({ scope, interval }: { scope: PanelScope; interval: '
       onRetry={p.reload}
       actions={
         <div className="controls">
+          {byTenant && <label>Chart tenant: <select className="select-sm" value={selected} onChange={(event) => setSelectedTenant(event.target.value)}>
+            <option value="">All tenants</option>
+            {options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+          </select></label>}
           {SERIES.map((s) => (
             <button key={s.id} className={`btn btn--sm ${series === s.id ? 'btn--active' : ''}`} onClick={() => setSeries(s.id)}>
               {s.label}
@@ -72,10 +83,11 @@ export function TrendPanel({ scope, interval }: { scope: PanelScope; interval: '
         </div>
       }
     >
-      {pts.length === 0 ? (
+      {byTenant && <p className="hint">Each color represents a tenant. Select a tenant to focus this chart; the other Overview panels remain combined.</p>}
+      {pts.length === 0 || (byTenant && !lines?.length) ? (
         <Empty>No trend data for this period.</Empty>
       ) : (
-        <TrendLineChart points={pts.map((pt) => ({ bucket: pt.bucket, value: pt[series] }))} label={meta.label} interval={interval} formatValue={fmt} />
+        <TrendLineChart points={byTenant ? [] : pts.map((pt) => ({ bucket: pt.bucket, value: pt[series] }))} lines={lines} label={meta.label} interval={interval} formatValue={fmt} />
       )}
     </Panel>
   );

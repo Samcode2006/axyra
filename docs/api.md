@@ -11,6 +11,13 @@ product IDs remain tenant-local, represented as `tenant_id/id` in combined ranki
 The Analytics page retains its selected-tenant view. The operator Overview shows
 configured metrics for an explicitly selected tenant.
 
+The admin Overview trend chart displays one color per tenant. Its **Chart tenant**
+selector switches between all tenants and one tenant without changing the other
+Overview panels. The hourly/daily interval, metric and date range still apply.
+`GET /v1/analytics/orders/trend?scope=organization&group_by=tenant` returns a
+`tenant_id` on each point and groups by tenant and bucket inside the authorized
+organization. Omitting `group_by` retains the combined trend response.
+
 Both Analytics and Overview include **Configured metrics**, automatically listing
 enabled definitions from Metric Configuration and refreshing definitions and
 results every three seconds. Scalar results appear as values and grouped results

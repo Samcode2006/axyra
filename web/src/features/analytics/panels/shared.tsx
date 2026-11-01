@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Spinner } from '../../../components/Feedback';
 
 interface PanelProps {
+  className?: string;
   title: ReactNode;
   loading: boolean;
   error: string | null;
@@ -11,9 +12,9 @@ interface PanelProps {
 }
 
 /** A titled panel that shows a spinner, an inline error with retry, or its content. */
-export function Panel({ title, loading, error, onRetry, actions, children }: PanelProps) {
+export function Panel({ title, loading, error, onRetry, actions, children, className }: PanelProps) {
   return (
-    <section className="panel">
+    <section className={`panel${className ? ` ${className}` : ''}`}>
       <div className="panel-head">
         <h2 className="panel-title">{title}</h2>
         {actions}
