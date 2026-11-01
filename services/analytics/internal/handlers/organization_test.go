@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestOrganizationDashboardIntegration(t *testing.T) {
 		}
 	}
 	h := New(database, nil, &config.Config{MaxConcurrentQueries: 5})
-	call := func(fn http.HandlerFunc, extra string) map[string]any {
+	call := func(fn http.HandlerFunc, extra string, wantTiming ...bool) map[string]any {
 		t.Helper()
 		r := httptest.NewRequest("GET", "/?from=2026-10-31T00:00:00Z&to=2026-10-31T23:59:59Z"+extra, nil)
 		r.Header.Set("X-Analytics-Organization", org)
@@ -60,17 +61,23 @@ func TestOrganizationDashboardIntegration(t *testing.T) {
 		if out.Code != 200 {
 			t.Fatalf("handler failed: %d %s", out.Code, out.Body.String())
 		}
+		if len(wantTiming) > 0 {
+			ms, err := strconv.ParseFloat(out.Header().Get("X-DB-Query-Ms"), 64)
+			if err != nil || ms < 0 {
+				t.Fatalf("missing DB query duration: %q", out.Header().Get("X-DB-Query-Ms"))
+			}
+		}
 		var value map[string]any
 		if err := json.Unmarshal(out.Body.Bytes(), &value); err != nil {
 			t.Fatal(err)
 		}
 		return value
 	}
-	summary := call(h.OrderSummary, "")
+	summary := call(h.OrderSummary, "", true)
 	if summary["total_orders"] != float64(4) || summary["total_revenue"] != float64(1000) {
 		t.Fatal(summary)
 	}
-	revenue := call(h.OrderRevenue, "")
+	revenue := call(h.OrderRevenue, "", true)
 	if revenue["avg_order_value"] != float64(250) {
 		t.Fatal(revenue)
 	}

@@ -29,10 +29,10 @@ type MonitoringStats struct {
 	ProcessedLast5m int64 `json:"processed_last_5m"`
 
 	// Query latency percentiles (ms) across all tenants, last 5 minutes
-	LatencyP50   *int64 `json:"latency_p50_ms,omitempty"`
-	LatencyP95   *int64 `json:"latency_p95_ms,omitempty"`
-	LatencyP99   *int64 `json:"latency_p99_ms,omitempty"`
-	LatencyCount int64  `json:"latency_sample_count"`
+	LatencyP50   *float64 `json:"latency_p50_ms,omitempty"`
+	LatencyP95   *float64 `json:"latency_p95_ms,omitempty"`
+	LatencyP99   *float64 `json:"latency_p99_ms,omitempty"`
+	LatencyCount int64    `json:"latency_sample_count"`
 }
 
 // MonitoringHandler returns platform-wide operational metrics for the Monitoring page.
@@ -96,18 +96,18 @@ func (h *Handler) MonitoringHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Query latency percentiles from op_query_latency (last 5 minutes).
 	type latencyRow struct {
-		p50, p95, p99 *int64
+		p50, p95, p99 *float64
 		count         int64
 	}
 	var lr latencyRow
 	perr := h.db.QueryRowContext(ctx, `
 		SELECT
-			PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_ms)::bigint,
-			PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)::bigint,
-			PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms)::bigint,
+			PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_ms),
+			PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms),
+			PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms),
 			COUNT(*)
 		FROM op_query_latency
-		WHERE recorded_at >= $1 AND ($2::text IS NULL OR tenant_id = $2)
+		WHERE timing_kind = 'db' AND recorded_at >= $1 AND ($2::text IS NULL OR tenant_id = $2)
 	`, ago5m, tenantArg).Scan(&lr.p50, &lr.p95, &lr.p99, &lr.count)
 	if perr == nil {
 		stats.LatencyP50 = lr.p50

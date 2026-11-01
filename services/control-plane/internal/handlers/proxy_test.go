@@ -18,6 +18,7 @@ func TestAnalyticsProxyServiceCredential(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer "+secret {
 			t.Error("service credential not supplied")
 		}
+		w.Header().Set("X-DB-Query-Ms", "12.345")
 		w.WriteHeader(204)
 	}))
 	defer upstream.Close()
@@ -32,6 +33,9 @@ func TestAnalyticsProxyServiceCredential(t *testing.T) {
 	req = req.WithContext(auth.WithPrincipal(req.Context(), &auth.Principal{Role: auth.RoleOperator}))
 	w = httptest.NewRecorder()
 	h.AnalyticsProxy()(w, req)
+	if w.Header().Get("X-DB-Query-Ms") != "12.345" {
+		t.Fatal("database timing was not forwarded unchanged")
+	}
 	if w.Code != 204 || calls != 1 {
 		t.Fatalf("authorized proxy failed: %d, %d", w.Code, calls)
 	}

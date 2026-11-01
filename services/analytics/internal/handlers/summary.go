@@ -39,7 +39,8 @@ func (h *Handler) OrderSummary(w http.ResponseWriter, r *http.Request) {
 	var totalRevenue float64
 
 	// Read from precomputed aggregates for the requested tenant
-	err := h.db.QueryRowContext(r.Context(), `
+	err := measureDBQuery(w, func() error {
+		return h.db.QueryRowContext(r.Context(), `
 		SELECT 
 			COALESCE(SUM(total_orders), 0),
 			COALESCE(SUM(active_orders), 0),
@@ -48,6 +49,7 @@ func (h *Handler) OrderSummary(w http.ResponseWriter, r *http.Request) {
 		FROM order_summary_hourly
 		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2 AND bucket <= $3
 	`, tenantID, fromTime.Truncate(time.Hour), toTime).Scan(&totalOrders, &activeOrders, &cancelledOrders, &totalRevenue)
+	})
 	if err != nil && err != sql.ErrNoRows {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
 		return

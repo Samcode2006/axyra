@@ -83,30 +83,33 @@ func (h *Handler) TopProducts(w http.ResponseWriter, r *http.Request) {
 		args = []interface{}{tenantID, limit}
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), query, args...)
+	products := make([]models.TopProduct, 0)
+	err := measureDBQuery(w, func() error {
+		rows, err := h.db.QueryContext(r.Context(), query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p models.TopProduct
+			if err := rows.Scan(&p.ProductID, &p.ProductName, &p.Category, &p.OrderCount, &p.Revenue,
+				&p.QuantitySold, &p.TotalDiscount, &p.ReturnCount); err != nil {
+				return err
+			}
+			products = append(products, p)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		queryFailed(w, r, err)
 		return
 	}
-	defer rows.Close()
-
-	products := make([]models.TopProduct, 0)
-	for rows.Next() {
-		var p models.TopProduct
-		if err := rows.Scan(&p.ProductID, &p.ProductName, &p.Category, &p.OrderCount, &p.Revenue,
-			&p.QuantitySold, &p.TotalDiscount, &p.ReturnCount); err != nil {
-			queryFailed(w, r, err)
-			return
-		}
+	for i := range products {
+		p := &products[i]
 		p.TotalRevenue = p.Revenue
 		p.ReturnRatePct = pct(float64(p.ReturnCount), float64(p.OrderCount))
 		p.AvgUnitPrice = ratio(p.Revenue, float64(p.QuantitySold))
 		p.TotalDiscount = round2(p.TotalDiscount)
-		products = append(products, p)
-	}
-	if err := rows.Err(); err != nil {
-		queryFailed(w, r, err)
-		return
 	}
 
 	respondJSON(w, http.StatusOK, models.TopProductsResponse{TenantID: tenantID, Data: products})

@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -116,7 +118,11 @@ type comparisonSample struct {
 	CheckedAt   time.Time           `json:"checked_at"`
 }
 
-func comparisonRows(ctx context.Context, db *sql.DB, store string, from, to time.Time) ([]comparisonProduct, error) {
+type comparisonQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func comparisonRows(ctx context.Context, db comparisonQuerier, store string, from, to time.Time) ([]comparisonProduct, float64, error) {
 	query := `SELECT product_id,COUNT(*) FILTER(WHERE status<>'cancelled'),COALESCE(SUM(amount) FILTER(WHERE status<>'cancelled'),0)::text FROM public.orders WHERE store_id=$1 AND product_id<>''`
 	args := []any{store}
 	if !from.IsZero() {
@@ -124,9 +130,10 @@ func comparisonRows(ctx context.Context, db *sql.DB, store string, from, to time
 		args = append(args, from, to)
 	}
 	query += ` GROUP BY product_id ORDER BY COALESCE(SUM(amount) FILTER(WHERE status<>'cancelled'),0) DESC, product_id LIMIT 100`
+	started := time.Now()
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	result := []comparisonProduct{}
@@ -134,12 +141,16 @@ func comparisonRows(ctx context.Context, db *sql.DB, store string, from, to time
 		var p comparisonProduct
 		var amount string
 		if err = rows.Scan(&p.ID, &p.Count, &amount); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		p.Revenue = json.Number(amount)
 		result = append(result, p)
 	}
-	return result, rows.Err()
+	err = rows.Err()
+	if closeErr := rows.Close(); err == nil {
+		err = closeErr
+	}
+	return result, float64(time.Since(started)) / float64(time.Millisecond), err
 }
 
 func comparisonDiff(a, b []comparisonProduct) []string {
@@ -185,6 +196,15 @@ func comparisonRange(r *http.Request) (time.Time, time.Time, error) {
 	return from, to, nil
 }
 
+// Never fall back to HTTP duration when the backend did not supply DB timing.
+func comparisonDBDuration(header http.Header) (float64, error) {
+	ms, err := strconv.ParseFloat(header.Get("X-DB-Query-Ms"), 64)
+	if err != nil || math.IsNaN(ms) || math.IsInf(ms, 0) || ms < 0 {
+		return 0, fmt.Errorf("missing or invalid DB query duration")
+	}
+	return ms, nil
+}
+
 func (h *Handler) ComparisonSnapshot(w http.ResponseWriter, r *http.Request) {
 	from, to, err := comparisonRange(r)
 	if err != nil {
@@ -200,10 +220,19 @@ func (h *Handler) ComparisonSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer db.Close()
+	// Acquire and establish the source connection before measuring the query.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		respondError(w, 502, "Source database connection failed")
+		return
+	}
+	defer conn.Close()
+	if err = conn.PingContext(ctx); err != nil {
+		respondError(w, 502, "Source database connection failed")
+		return
+	}
 	sample := comparisonSample{CheckedAt: time.Now().UTC()}
-	started := time.Now()
-	sample.Source, err = comparisonRows(ctx, db, store, from, to)
-	sample.SourceMS = float64(time.Since(started).Microseconds()) / 1000
+	sample.Source, sample.SourceMS, err = comparisonRows(ctx, conn, store, from, to)
 	if err != nil {
 		respondError(w, 502, "Source query failed. Check source connectivity and the reference orders schema.")
 		return
@@ -220,7 +249,6 @@ func (h *Handler) ComparisonSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	started = time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		respondError(w, 502, "Analytics service is unavailable")
@@ -239,9 +267,13 @@ func (h *Handler) ComparisonSnapshot(w http.ResponseWriter, r *http.Request) {
 		respondError(w, 502, "Invalid analytics response or tenant scope")
 		return
 	}
-	sample.AnalyticsMS = float64(time.Since(started).Microseconds()) / 1000
+	sample.AnalyticsMS, err = comparisonDBDuration(resp.Header)
+	if err != nil {
+		respondError(w, 502, "Analytics DB timing unavailable; rebuild the analytics service")
+		return
+	}
 	sample.Analytics = body.Data
-	after, err := comparisonRows(ctx, db, store, from, to)
+	after, _, err := comparisonRows(ctx, conn, store, from, to)
 	if err != nil {
 		respondError(w, 502, "Could not recheck source stability")
 		return

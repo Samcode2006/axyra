@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -96,5 +97,21 @@ func TestComparisonDateRange(t *testing.T) {
 	from, to, err := comparisonRange(httptest.NewRequest("GET", "/?from=2026-11-01T00:00:00Z&to=2026-11-01T00:00:00.999999Z", nil))
 	if err != nil || to.Sub(from) != time.Second-time.Microsecond {
 		t.Fatalf("range precision lost: %v", err)
+	}
+}
+
+func TestComparisonRequiresBackendDBTiming(t *testing.T) {
+	for _, raw := range []string{"", "NaN", "+Inf", "-1", "invalid"} {
+		h := http.Header{}
+		h.Set("X-DB-Query-Ms", raw)
+		if _, err := comparisonDBDuration(h); err == nil {
+			t.Fatalf("accepted %q", raw)
+		}
+	}
+	h := http.Header{}
+	h.Set("X-DB-Query-Ms", "0.125")
+	ms, err := comparisonDBDuration(h)
+	if err != nil || ms != 0.125 {
+		t.Fatalf("lost backend precision: %f %v", ms, err)
 	}
 }

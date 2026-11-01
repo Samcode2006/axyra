@@ -236,9 +236,9 @@ func (db *DB) UpsertAgentCursor(ctx context.Context, agentID, source, confirmedL
 
 // RecordQueryLatency persists one query observation for the monitoring page.
 // It is best-effort: failures are logged but never returned to the caller.
-func (db *DB) RecordQueryLatency(ctx context.Context, tenantID, endpoint string, durationMs int64) {
+func (db *DB) RecordQueryLatency(ctx context.Context, tenantID, endpoint string, durationMs float64) {
 	_, _ = db.ExecContext(ctx,
-		`INSERT INTO op_query_latency (tenant_id, endpoint, duration_ms) VALUES ($1, $2, $3)`,
+		`INSERT INTO op_query_latency (tenant_id, endpoint, duration_ms, timing_kind) VALUES ($1, $2, $3, 'db')`,
 		tenantID, endpoint, durationMs)
 }
 

@@ -305,6 +305,7 @@ html, body, #root { height: 100%; background: var(--bg); color: var(--text); }
 .json-cell { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ─── Monitoring page (Phase 5 / B-5) ────────────────────────────────────── */
+.query-retrieval { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px; font-size: 12px; }
 .monitoring-latency { display: flex; flex-direction: column; gap: 12px; }
 .monitoring-latency-row { display: flex; align-items: center; gap: 12px; }
 .monitoring-latency-label { width: 28px; font-size: 12px; font-weight: 600; color: var(--text-muted); text-align: right; flex-shrink: 0; }

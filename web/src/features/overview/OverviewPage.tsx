@@ -1,3 +1,5 @@
+import { DBQueryTime } from '../../components/DBQueryTime';
+import { useDBQueryTiming } from '../../lib/useDBQueryTiming';
 import AnalyticsPage from '../analytics/AnalyticsPage';
 import { useRef } from 'react';
 import { StatCard } from '../../components/StatCard';
@@ -26,6 +28,7 @@ export default function OverviewPage() {
 }
 
 function OperatorOverview() {
+  const timings = useDBQueryTiming('overview', 'revenue');
   const previous = useRef(new Map<string, TenantRow>());
   const live = usePanel(async () => {
       const [t, a] = await Promise.all([tenants.list({ per_page: 200 }), agents.list()]);
@@ -83,6 +86,8 @@ function OperatorOverview() {
         <h1>Overview</h1>
         {latest && <span className="freshness-badge">Latest event {relativeTime(latest)}</span>}
       </div>
+
+      <DBQueryTime timings={timings} combined />
 
       {live.error && <ErrorMsg message={live.error} />}
       {rows.some((row) => row.refreshFailed) && <ErrorMsg message="Some store metrics could not refresh. Previous values are retained where available." />}

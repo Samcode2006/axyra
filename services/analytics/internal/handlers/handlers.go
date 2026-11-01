@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/axyra/analytics/internal/config"
 	"github.com/axyra/analytics/internal/db"
@@ -33,7 +32,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 // acquireQuery tries to acquire a concurrency slot for the tenant (B-3) and
-// records query latency when the returned done function is called (B-5).
+// records time spent in DB reads when the returned done function is called.
 // If the limit is exceeded it writes 429 and returns ok=false.
 func (h *Handler) acquireQuery(w http.ResponseWriter, r *http.Request, tenantID, endpoint string) (done func(), ok bool) {
 	capacity := h.db.GetTenantMaxConcurrency(tenantID)
@@ -45,11 +44,13 @@ func (h *Handler) acquireQuery(w http.ResponseWriter, r *http.Request, tenantID,
 		}
 		return nil, false
 	}
-	start := time.Now()
+	ctx, timing := db.WithQueryTiming(r.Context())
+	*r = *r.WithContext(ctx)
 	return func() {
 		h.limiter.Release(tenantID)
-		ms := time.Since(start).Milliseconds()
-		h.db.RecordQueryLatency(r.Context(), tenantID, endpoint, ms)
+		if ms, count := timing.Snapshot(); count > 0 {
+			h.db.RecordQueryLatency(r.Context(), tenantID, endpoint, ms)
+		}
 	}, true
 }
 

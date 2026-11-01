@@ -1,3 +1,5 @@
+import { DBQueryTime } from '../../components/DBQueryTime';
+import { useDBQueryTiming } from '../../lib/useDBQueryTiming';
 import { useEffect, useMemo, useState } from 'react';
 import { analytics, ORGANIZATION_SCOPE, tenants as tenantsApi } from '../../lib/api';
 import { StatCard } from '../../components/StatCard';
@@ -54,6 +56,7 @@ export default function AnalyticsPage({ organization = false }: { organization?:
   }, []);
 
   const scope: PanelScope = { from: range.from, to: range.to, tenantId: organization ? ORGANIZATION_SCOPE : tenantId || undefined };
+  const timings = useDBQueryTiming(JSON.stringify([scope.tenantId, range.from, range.to]));
   const tenantName = tenantList.find((t) => t.id === tenantId)?.name;
 
   return (
@@ -104,6 +107,8 @@ export default function AnalyticsPage({ organization = false }: { organization?:
           <span className="hint">Showing {range.from.slice(0, 10)} to {range.to.slice(0, 10)} (UTC)</span>
         </form>
       )}
+
+      <DBQueryTime timings={timings} />
 
       {organization && <p className="hint">Combined data for every tenant in your organization. Customer and product IDs are scoped to their tenant.</p>}
       <p className="hint">Ranges cover whole UTC days. Customer, geography, payment and return figures are by the day an order was created.</p>
