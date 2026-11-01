@@ -1,12 +1,13 @@
 import { DBQueryTime } from '../../components/DBQueryTime';
 import { useDBQueryTiming } from '../../lib/useDBQueryTiming';
 import AnalyticsPage from '../analytics/AnalyticsPage';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { StatCard } from '../../components/StatCard';
 import { Badge } from '../../components/Badge';
 import { Spinner, ErrorMsg } from '../../components/Feedback';
 import { analytics, tenants, agents, auth } from '../../lib/api';
 import { usePanel } from '../analytics/panels/usePanel';
+import { ConfiguredMetrics } from '../analytics/panels/ConfiguredMetrics';
 import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
 import type { CustomerSummary, RevenueBreakdown, Tenant, TenantAlert, TenantHealth } from '../../types';
 
@@ -52,7 +53,7 @@ function OperatorOverview() {
       );
       // Tenants that are not active still belong in the health table.
       const inactive = all.filter((x) => x.status !== 'active').map((tenant): TenantRow => ({ tenant }));
-      return { rows: [...detail, ...inactive], tenantTotal: t.data.total, agentList: a.data };
+      return { rows: [...detail, ...inactive], tenantTotal: t.data.total, agentList: a.data, tenantList: all };
   }, 'overview', 3000);
 
   if (live.loading) return <Spinner />;
@@ -116,6 +117,8 @@ function OperatorOverview() {
           accent={connectedAgents > 0 ? 'green' : 'amber'}
         />
       </div>
+
+      <OperatorConfiguredMetrics tenantList={live.data.tenantList} />
 
       {top && top.health && (
         <section className="panel">
@@ -186,5 +189,23 @@ function OperatorOverview() {
         </table>
       </section>
     </div>
+  );
+}
+
+function OperatorConfiguredMetrics({ tenantList }: { tenantList: Tenant[] }) {
+  const [selected, setSelected] = useState('');
+  const tenant = tenantList.find((item) => item.id === selected)
+    ?? tenantList.find((item) => item.status === 'active') ?? tenantList[0];
+  if (!tenant) return null;
+  return (
+    <section>
+      <label className="controls">Configured metrics tenant
+        <select className="select-sm" value={tenant.id} onChange={(event) => setSelected(event.target.value)}>
+          {tenantList.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+        <span className="hint">Last 7 UTC days</span>
+      </label>
+      <ConfiguredMetrics scope={{ ...utcDayRange(7), tenantId: tenant.id }} organizationId={tenant.organization_id} />
+    </section>
   );
 }

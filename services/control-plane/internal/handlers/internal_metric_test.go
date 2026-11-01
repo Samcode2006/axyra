@@ -86,4 +86,30 @@ func TestInternalMetricTenantScope(t *testing.T) {
 			}
 		}
 	}
+	for _, tc := range []struct {
+		metric, org, name string
+		status            int
+	}{
+		{"custom", "orga", "A", 200}, {"custom", "orgb", "B", 200},
+		{"shared", "orgb", "Builtin", 200}, {"private", "orgb", "", 404},
+		{"disabled", "orga", "Disabled", 200}, {"shared", "unknown", "", 404},
+	} {
+		req := httptest.NewRequest("GET", "/internal/metric-definitions/"+tc.metric+"?organization_id=orga", nil)
+		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("X-Analytics-Organization", tc.org)
+		w := httptest.NewRecorder()
+		h.Routes().ServeHTTP(w, req)
+		if w.Code != tc.status {
+			t.Fatalf("%+v: got %d %s", tc, w.Code, w.Body)
+		}
+		if w.Code == 200 {
+			var result struct{ Name string }
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Name != tc.name {
+				t.Fatalf("%+v: got definition %s", tc, result.Name)
+			}
+		}
+	}
 }

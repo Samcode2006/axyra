@@ -83,3 +83,39 @@ func TestOrganizationScopeCannotBeSpoofed(t *testing.T) {
 		t.Fatal("unsupported scope reached analytics")
 	}
 }
+
+func TestConfiguredMetricOrganizationScope(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("X-Analytics-Organization") != "org_own" || r.URL.Query().Get("tenant_id") != "" || r.URL.Query().Get("organization_id") != "" {
+			t.Errorf("untrusted scope forwarded: %s %v", r.URL, r.Header)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	h := New(nil, &config.Config{AnalyticsURL: upstream.URL, ServiceToken: strings.Repeat("s", 32)})
+	for _, tc := range []struct {
+		path, method string
+		role         auth.Role
+		want         int
+	}{
+		{"custom_revenue", "GET", auth.RoleAdmin, 204},
+		{"custom_revenue/query", "GET", auth.RoleAdmin, 403},
+		{"", "GET", auth.RoleAdmin, 403},
+		{"custom_revenue", "POST", auth.RoleAdmin, 403},
+		{"custom_revenue", "GET", auth.RoleOperator, 403},
+	} {
+		r := httptest.NewRequest(tc.method, "/v1/analytics/metrics/"+tc.path+"?scope=organization&organization_id=other&tenant_id=other", nil)
+		r.Header.Set("X-Analytics-Organization", "other")
+		r = r.WithContext(auth.WithPrincipal(r.Context(), &auth.Principal{Role: tc.role, OrgID: "org_own"}))
+		w := httptest.NewRecorder()
+		h.AnalyticsProxy()(w, r)
+		if w.Code != tc.want {
+			t.Fatalf("%+v: got %d", tc, w.Code)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("unexpected forwarded calls: %d", calls)
+	}
+}

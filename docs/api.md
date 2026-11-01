@@ -8,7 +8,22 @@ The database resolves all registered tenants in that organization at query time,
 without pagination limits or an active-only filter. Totals and time buckets are
 combined before ranking or calculating averages and percentages. Customer and
 product IDs remain tenant-local, represented as `tenant_id/id` in combined rankings.
-The Analytics page retains its selected-tenant view; the operator Overview is unchanged.
+The Analytics page retains its selected-tenant view. The operator Overview shows
+configured metrics for an explicitly selected tenant.
+
+Both Analytics and Overview include **Configured metrics**, automatically listing
+enabled definitions from Metric Configuration and refreshing definitions and
+results every three seconds. Scalar results appear as values and grouped results
+as tables. Disabled or deleted definitions disappear on refresh. The selected
+date range applies to these metrics, including their configured filters.
+
+`GET /v1/analytics/metrics/{metric_id}?from=...&to=...` accepts either the usual
+tenant selector or `scope=organization` for an admin's organization. Organization
+queries aggregate the underlying order rows together, so averages and distinct
+counts are computed directly rather than added across tenants. Order, product
+and SKU identifiers remain tenant-local. Product grouping in organization scope
+returns an additional `tenant_id` column. Configured granularity does not create
+time buckets in this endpoint; results cover the entire selected range.
 
 Managed local PostgreSQL creation is available through `POST /v1/tenants` with
 `database_mode: "managed"`. It returns 202 and a provisioning tenant; existing
@@ -81,7 +96,8 @@ queries and rebuilds; do not publish port 8082 for troubleshooting.
 For configured metric execution, Analytics uses the same private service
 credential to fetch `GET /internal/metric-definitions/{metric_id}?tenant_id=...`
 from the control plane. This service-only endpoint derives organization scope
-from the tenant; an `organization_id` supplied by a caller cannot override it.
+from the tenant, or the trusted `X-Analytics-Organization` header for organization
+queries without a tenant. An `organization_id` query parameter cannot override it.
 It returns that organization's definition or a built-in definition. The public
 `/v1/metric-definitions` management routes still require a console JWT.
 Metric execution returns 404 for an unavailable definition, 410 when disabled,

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axyra/control-plane/internal/auth"
+	"github.com/axyra/control-plane/internal/metrics"
 )
 
 // AnalyticsProxy forwards dashboard analytics requests to the analytics service.
@@ -51,7 +52,7 @@ func (h *Handler) AnalyticsProxy() http.HandlerFunc {
 		// Never trust a browser-supplied internal organization scope.
 		r.Header.Del("X-Analytics-Organization")
 		if r.URL.Query().Get("scope") == "organization" {
-			if p.IsOperator() || p.OrgID == "" || r.Method != http.MethodGet || !organizationAnalyticsPaths[r.URL.Path] {
+			if p.IsOperator() || p.OrgID == "" || r.Method != http.MethodGet || !supportsOrganizationAnalytics(r.URL.Path) {
 				respondError(w, http.StatusForbidden, "Organization overview is only available for admin dashboard reads")
 				return
 			}
@@ -119,8 +120,15 @@ func (h *Handler) scopeAnalyticsRequest(w http.ResponseWriter, r *http.Request, 
 	return true
 }
 
-// Rebuild, metrics configured by users, and operational/admin endpoints cannot
-// opt into this scope. Only the dashboard's read endpoints support aggregation.
+func supportsOrganizationAnalytics(path string) bool {
+	if organizationAnalyticsPaths[path] {
+		return true
+	}
+	const prefix = "/v1/analytics/metrics/"
+	return strings.HasPrefix(path, prefix) && metrics.ValidID(strings.TrimPrefix(path, prefix))
+}
+
+// Rebuild and operational/admin endpoints cannot opt into this scope.
 var organizationAnalyticsPaths = map[string]bool{
 	"/v1/analytics/status":         true,
 	"/v1/analytics/orders/summary": true, "/v1/analytics/orders/trend": true,

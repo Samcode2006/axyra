@@ -242,6 +242,17 @@ export interface MetricDefinition {
   updated_at: string;
 }
 
+export type MetricResultRow = Record<string, string | number | null>;
+
+export interface MetricQueryResponse {
+  metric_id: string;
+  name: string;
+  tenant_id: string;
+  from: string;
+  to: string;
+  result: MetricResultRow | MetricResultRow[] | null;
+}
+
 // ─── Audit ───────────────────────────────────────────────────────────────────
 
 export interface AuditLog {

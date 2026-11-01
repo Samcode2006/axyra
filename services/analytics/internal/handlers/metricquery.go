@@ -111,13 +111,22 @@ func (h *Handler) QueryMetric(w http.ResponseWriter, r *http.Request) {
 var errMetricNotFound = errors.New("metric definition not found")
 
 func (h *Handler) fetchMetricDef(ctx context.Context, metricID, tenantID string) (*metricDefinitionResp, error) {
-	endpoint := fmt.Sprintf("%s/internal/metric-definitions/%s?%s", strings.TrimRight(h.cfg.ControlPlaneURL, "/"), url.PathEscape(metricID), url.Values{"tenant_id": {tenantID}}.Encode())
+	params := url.Values{"tenant_id": {tenantID}}
+	orgID := ""
+	if strings.HasPrefix(tenantID, "org:") {
+		orgID = strings.TrimPrefix(tenantID, "org:")
+		params.Del("tenant_id")
+	}
+	endpoint := fmt.Sprintf("%s/internal/metric-definitions/%s?%s", strings.TrimRight(h.cfg.ControlPlaneURL, "/"), url.PathEscape(metricID), params.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
+	if orgID != "" {
+		req.Header.Set("X-Analytics-Organization", orgID)
+	}
 	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -234,6 +243,10 @@ func (h *Handler) executeMetric(ctx context.Context, tenantID string, def *metri
 		}
 		needsExtended = needsExtended || col.extended
 		aggExpr = fmt.Sprintf("COUNT(DISTINCT %s)", field)
+		// Local identifiers from different stores must not collapse in Overview.
+		if field == "order_id" || field == "product_id" || field == "sku" {
+			aggExpr = fmt.Sprintf("COUNT(DISTINCT (tenant_id, %s))", field)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported aggregation %q", def.Config.Aggregation)
 	}
@@ -280,10 +293,18 @@ func (h *Handler) executeMetric(ctx context.Context, tenantID string, def *metri
 			needsExtended = needsExtended || col.extended
 			cols = append(cols, c)
 		}
+		if strings.HasPrefix(tenantID, "org:") {
+			for _, c := range cols {
+				if c == "product_id" {
+					cols = append([]string{"tenant_id"}, cols...)
+					break
+				}
+			}
+		}
 		for _, c := range cols {
 			selectExtra += ", " + c
 		}
-		groupByClause = "GROUP BY " + joinCols(cols)
+		groupByClause = "GROUP BY " + joinCols(cols) + " ORDER BY " + joinCols(cols)
 	}
 
 	if needsExtended {
@@ -293,7 +314,7 @@ func (h *Handler) executeMetric(ctx context.Context, tenantID string, def *metri
 	query := fmt.Sprintf(`
 		SELECT %s%s
 		FROM order_state
-		WHERE tenant_id = $1
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1))
 		  AND occurred_at >= $2
 		  AND occurred_at <= $3
 		  %s

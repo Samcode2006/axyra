@@ -1,7 +1,7 @@
 import { DBQueryTime } from '../../components/DBQueryTime';
 import { useDBQueryTiming } from '../../lib/useDBQueryTiming';
 import { useEffect, useMemo, useState } from 'react';
-import { analytics, ORGANIZATION_SCOPE, tenants as tenantsApi } from '../../lib/api';
+import { analytics, auth, ORGANIZATION_SCOPE, tenants as tenantsApi } from '../../lib/api';
 import { StatCard } from '../../components/StatCard';
 import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
 import type { AnalyticsStatus, BreakdownGroup, Tenant } from '../../types';
@@ -11,6 +11,7 @@ import { DiscountsPanel, FunnelPanel, PaymentsPanel, ProductsPanel, ReturnsPanel
 import type { PanelScope } from './panels/format';
 import { Empty, Panel } from './panels/shared';
 import { usePanel } from './panels/usePanel';
+import { ConfiguredMetrics } from './panels/ConfiguredMetrics';
 
 const RANGES = [
   { days: 1, label: 'Today' },
@@ -119,6 +120,8 @@ export default function AnalyticsPage({ organization = false }: { organization?:
       ) : (
         <>
           <FreshnessAndSummary scope={scope} />
+
+          <ConfiguredMetrics scope={scope} organizationId={organization ? auth.user()?.organization_id : tenantList.find((tenant) => tenant.id === tenantId)?.organization_id} />
 
           <h2 className="section-title">Revenue &amp; financials</h2>
           <RevenueStrip scope={scope} />

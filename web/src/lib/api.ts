@@ -25,6 +25,7 @@ import type {
   IssuedToken,
   MetricConfig,
   MetricDefinition,
+  MetricQueryResponse,
   MonitoringStats,
   OrderSummary,
   Organization,
@@ -206,6 +207,8 @@ function dashboardParams<T extends { tenant_id?: string }>(params?: T) {
 }
 
 export const analytics = {
+  metric: (id: string, params: { from: string; to: string; tenant_id?: string }) =>
+    http.get<MetricQueryResponse>(`/v1/analytics/metrics/${encodeURIComponent(id)}`, { params: dashboardParams(params) }),
   summary: (params: { from: string; to: string; tenant_id?: string }) =>
     http.get<OrderSummary>('/v1/analytics/orders/summary', { params: dashboardParams(params) }),
 
@@ -283,7 +286,9 @@ export const policies = {
 // ─── Metric definitions ──────────────────────────────────────────────────────
 
 export const metricDefinitions = {
-  list: () => http.get<MetricDefinition[]>('/v1/metric-definitions'),
+  list: (organizationId?: string) => http.get<MetricDefinition[]>('/v1/metric-definitions', {
+    params: organizationId ? { organization_id: organizationId } : undefined,
+  }),
   put: (
     id: string,
     payload: {
