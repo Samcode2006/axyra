@@ -1,62 +1,58 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
+	"github.com/axyra/analytics/internal/models"
 	"net/http"
 	"time"
-
-	"github.com/axyra/analytics/internal/models"
 )
 
-// maxHealthyLagSeconds is the lag threshold above which the pipeline is
-// considered unhealthy. 5 minutes matches the PRD "good" freshness target.
 const maxHealthyLagSeconds = 5 * 60
 
+// This describes the last completed event, not the age of a queued event.
+// No recent activity is idle, not evidence that ingestion has failed.
+func eventActivity(last *time.Time, delay *float64, now time.Time) string {
+	if last == nil {
+		return "waiting"
+	}
+	if now.Sub(*last) >= 5*time.Minute {
+		return "idle"
+	}
+	if delay != nil && *delay >= maxHealthyLagSeconds {
+		return "delayed"
+	}
+	return "active"
+}
+
+func (h *Handler) tenantFreshness(ctx context.Context, tenantID string) (models.AnalyticsStatus, error) {
+	out := models.AnalyticsStatus{TenantID: tenantID, LastLSN: "0/0", ActivityState: "waiting", IsHealthy: true}
+	var at time.Time
+	var delay float64
+	err := h.db.QueryRowContext(ctx, `
+  SELECT r.lsn, p.processed_at,
+         GREATEST(EXTRACT(EPOCH FROM (p.processed_at-r.occurred_at)),0)
+  FROM raw_events r JOIN processed_events p ON p.event_id=r.event_id AND p.tenant_id=r.tenant_id
+  WHERE r.tenant_id=$1 AND p.status='processed'
+  ORDER BY r.id DESC LIMIT 1`, tenantID).Scan(&out.LastLSN, &at, &delay)
+	if err == sql.ErrNoRows {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	out.LastProcessedAt = &at
+	out.LagSeconds = &delay
+	out.ActivityState = eventActivity(&at, &delay, time.Now())
+	out.IsHealthy = out.ActivityState != "delayed"
+	return out, nil
+}
+
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
-	tenantID := h.resolveRequestTenant(r)
-
-	// The tenant's freshness is the time and LSN of its own latest event.
-	//
-	// processing_watermarks is not used: it holds one row per AGENT, and its
-	// tenant_id is overwritten by whichever tenant's event arrived last. For an
-	// agent serving several tenants most of them would have no row, and would be
-	// reported healthy with LSN 0/0.
-	var lastLSN string
-	var lastProcessedAt time.Time
-
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT lsn, occurred_at
-		FROM raw_events
-		WHERE tenant_id = $1
-		ORDER BY occurred_at DESC, id DESC
-		LIMIT 1
-	`, tenantID).Scan(&lastLSN, &lastProcessedAt)
-	if err != nil && err != sql.ErrNoRows {
+	out, err := h.tenantFreshness(r.Context(), h.resolveRequestTenant(r))
+	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to query freshness")
 		return
 	}
-	if err == sql.ErrNoRows || lastProcessedAt.IsZero() {
-		// No data processed yet — report a zero state rather than a server error.
-		respondJSON(w, http.StatusOK, models.AnalyticsStatus{
-			TenantID:        tenantID,
-			LastProcessedAt: time.Now().UTC(),
-			LastLSN:         "0/0",
-			LagSeconds:      0,
-			IsHealthy:       true,
-		})
-		return
-	}
-
-	lagSeconds := time.Since(lastProcessedAt).Seconds()
-	if lagSeconds < 0 {
-		lagSeconds = 0
-	}
-
-	respondJSON(w, http.StatusOK, models.AnalyticsStatus{
-		TenantID:        tenantID,
-		LastProcessedAt: lastProcessedAt,
-		LastLSN:         lastLSN,
-		LagSeconds:      lagSeconds,
-		IsHealthy:       lagSeconds < maxHealthyLagSeconds,
-	})
+	respondJSON(w, http.StatusOK, out)
 }

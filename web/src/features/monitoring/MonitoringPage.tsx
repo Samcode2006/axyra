@@ -1,40 +1,24 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { Activity, AlertTriangle, CheckCircle, Clock, Database, Layers, XCircle, Zap } from 'lucide-react';
 import { analytics, errMsg } from '../../lib/api';
-import { useLoadEffect } from '../../lib/useLoadEffect';
+import { usePanel } from '../analytics/panels/usePanel';
 import { ErrorMsg, Spinner } from '../../components/Feedback';
 import { StatCard } from '../../components/StatCard';
 import MonitoringDetailPanels from './MonitoringDetailPanels';
 import { relativeTime } from '../../lib/utils';
-import type { DeadLetterEvent, MonitoringStats } from '../../types';
 
 export default function MonitoringPage() {
-  const [stats, setStats] = useState<MonitoringStats | null>(null);
-  const [deadLetters, setDeadLetters] = useState<DeadLetterEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
   const [rebuildLoading, setRebuildLoading] = useState(false);
   // Bumped by Refresh so the independently-loaded detail panels reload with the rest.
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const load = useCallback(async () => {
-    try {
-      const [monResp, dlResp] = await Promise.all([
-        analytics.monitoring(),
-        analytics.deadLetter({ limit: 20 }),
-      ]);
-      setStats(monResp.data);
-      setDeadLetters(dlResp.data);
-      setError(null);
-    } catch (err) {
-      setError(errMsg(err, 'Failed to load monitoring data'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useLoadEffect(load);
+  const live = usePanel(async () => {
+    const [mon, dl] = await Promise.all([analytics.monitoring(), analytics.deadLetter({ limit: 20 })]);
+    return { stats: mon.data, deadLetters: dl.data };
+  }, `monitoring|${refreshKey}`);
+  const stats = live.data?.stats;
+  const deadLetters = live.data?.deadLetters ?? [];
 
   const handleRebuild = async () => {
     if (!confirm('Rebuild all aggregates for the current tenant from raw events? This may take a while.')) return;
@@ -52,8 +36,8 @@ export default function MonitoringPage() {
     }
   };
 
-  if (loading) return <Spinner />;
-  if (error) return <ErrorMsg message={error} />;
+  if (live.loading) return <Spinner />;
+  if (!live.data) return <ErrorMsg message={live.error ?? 'Monitoring unavailable'} />;
 
   const WorkerIcon = stats?.worker_healthy ? CheckCircle : XCircle;
   const workerColor = stats?.worker_healthy ? 'var(--green)' : 'var(--red)';
@@ -63,7 +47,7 @@ export default function MonitoringPage() {
       <div className="page-header">
         <h1>Monitoring</h1>
         <div className="row-actions">
-          <button className="btn btn--sm" onClick={() => { setLoading(true); setRefreshKey((k) => k + 1); void load(); }}>
+          <button className="btn btn--sm" onClick={() => { setRefreshKey((k) => k + 1); }}>
             ↻ Refresh
           </button>
           <button
@@ -83,10 +67,11 @@ export default function MonitoringPage() {
         </div>
       )}
 
+      {live.error && <ErrorMsg message={live.error} />}
       {/* Worker health strip */}
       <div className={`freshness-strip ${stats?.worker_healthy ? 'freshness-strip--ok' : 'freshness-strip--warn'}`}>
         <WorkerIcon size={14} style={{ display: 'inline', verticalAlign: 'middle', color: workerColor, marginRight: 6 }} />
-        Worker status: <strong>{stats?.worker_healthy ? 'Healthy' : 'Degraded'}</strong>
+        Worker status: <strong>{stats?.worker_state === 'idle' ? 'Idle ? no queued events' : stats?.worker_state ?? 'unknown'}</strong>
         {stats?.last_processed_at && (
           <>&nbsp;·&nbsp; Last processed: <strong>{relativeTime(stats.last_processed_at)}</strong></>
         )}

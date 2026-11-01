@@ -26,7 +26,7 @@ export interface PanelState<T> {
  * was fetched under, so changing the key reads as loading immediately and a late
  * response from a superseded request is ignored.
  */
-export function usePanel<T>(fetcher: () => Promise<T>, requestKey: string): PanelState<T> {
+export function usePanel<T>(fetcher: () => Promise<T>, requestKey: string, refreshMs = 3000): PanelState<T> {
   const [settled, setSettled] = useState<Settled<T> | null>(null);
   // Bumped by reload() to refetch under the same key.
   const [attempt, setAttempt] = useState(0);
@@ -39,18 +39,36 @@ export function usePanel<T>(fetcher: () => Promise<T>, requestKey: string): Pane
 
   useEffect(() => {
     let current = true;
-    fetchRef
-      .current()
-      .then((data) => {
-        if (current) setSettled({ key: fullKey, data, error: null });
-      })
-      .catch((err) => {
-        if (current) setSettled({ key: fullKey, data: null, error: errMsg(err, 'Failed to load') });
-      });
+    let running = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const load = async () => {
+      if (!current || running || document.hidden) return;
+      clearTimeout(timer);
+      running = true;
+      try {
+        const data = await fetchRef.current();
+        if (current) setSettled((prev) =>
+          prev?.key === fullKey && !prev.error && JSON.stringify(prev.data) === JSON.stringify(data)
+            ? prev : { key: fullKey, data, error: null });
+      } catch (err) {
+        if (current) setSettled((prev) => ({
+          key: fullKey, data: prev?.key === fullKey ? prev.data : null,
+          error: errMsg(err, 'Live refresh failed; showing the last available values'),
+        }));
+      } finally {
+        running = false;
+        if (current && refreshMs > 0) timer = setTimeout(() => void load(), refreshMs);
+      }
+    };
+    const visible = () => { if (!document.hidden) void load(); };
+    void load();
+    document.addEventListener('visibilitychange', visible);
     return () => {
       current = false; // a newer request has started, or the panel unmounted
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', visible);
     };
-  }, [fullKey]);
+  }, [fullKey, refreshMs]);
 
   const reload = useCallback(() => setAttempt((a) => a + 1), []);
 

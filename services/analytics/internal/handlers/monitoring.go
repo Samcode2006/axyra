@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"time"
 )
@@ -19,6 +20,7 @@ type MonitoringStats struct {
 	// Worker health: last successfully processed event timestamp
 	LastProcessedAt *time.Time `json:"last_processed_at,omitempty"`
 	WorkerHealthy   bool       `json:"worker_healthy"`
+	WorkerState     string     `json:"worker_state"`
 
 	// Failed / dead-letter events
 	DeadLetterCount int64 `json:"dead_letter_count"`
@@ -27,10 +29,10 @@ type MonitoringStats struct {
 	ProcessedLast5m int64 `json:"processed_last_5m"`
 
 	// Query latency percentiles (ms) across all tenants, last 5 minutes
-	LatencyP50  *int64 `json:"latency_p50_ms,omitempty"`
-	LatencyP95  *int64 `json:"latency_p95_ms,omitempty"`
-	LatencyP99  *int64 `json:"latency_p99_ms,omitempty"`
-	LatencyCount int64 `json:"latency_sample_count"`
+	LatencyP50   *int64 `json:"latency_p50_ms,omitempty"`
+	LatencyP95   *int64 `json:"latency_p95_ms,omitempty"`
+	LatencyP99   *int64 `json:"latency_p99_ms,omitempty"`
+	LatencyCount int64  `json:"latency_sample_count"`
 }
 
 // MonitoringHandler returns platform-wide operational metrics for the Monitoring page.
@@ -53,7 +55,8 @@ func (h *Handler) MonitoringHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Queue depth from Redis (best-effort; 0 on error or memory queue).
-	stats.QueueDepth = h.queueDepth(ctx)
+	var queueKnown bool
+	stats.QueueDepth, queueKnown = h.queueDepth(ctx)
 
 	// Ingestion rate from raw_events received timestamp.
 	_ = h.db.QueryRowContext(ctx,
@@ -68,14 +71,23 @@ func (h *Handler) MonitoringHandler(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM processed_events WHERE processed_at >= $1 AND status = 'processed' AND ($2::text IS NULL OR tenant_id = $2)`, ago5m, tenantArg).
 		Scan(&stats.ProcessedLast5m)
 
-	// Worker health: last processed_at across all watermarks.
-	var lastAt time.Time
-	err := h.db.QueryRowContext(ctx, `SELECT MAX(last_processed_at) FROM processing_watermarks WHERE ($1::text IS NULL OR tenant_id = $1)`, tenantArg).Scan(&lastAt)
-	if err == nil && !lastAt.IsZero() {
-		stats.LastProcessedAt = &lastAt
-		stats.WorkerHealthy = lastAt.After(agoHealthy)
-	} else {
-		stats.WorkerHealthy = false
+	// Completed events measure actual processing time, not source event age.
+	var lastAt sql.NullTime
+	err := h.db.QueryRowContext(ctx, `SELECT MAX(processed_at) FROM processed_events WHERE status='processed' AND ($1::text IS NULL OR tenant_id=$1)`, tenantArg).Scan(&lastAt)
+	stats.WorkerState = "unknown"
+	if err == nil {
+		if lastAt.Valid {
+			stats.LastProcessedAt = &lastAt.Time
+		}
+		if lastAt.Valid && lastAt.Time.After(agoHealthy) {
+			stats.WorkerState = "processing"
+			stats.WorkerHealthy = true
+		} else if queueKnown && stats.QueueDepth == 0 {
+			stats.WorkerState = "idle"
+			stats.WorkerHealthy = true
+		} else if queueKnown && tenantArg == nil && stats.QueueDepth > 0 {
+			stats.WorkerState = "stalled"
+		}
 	}
 
 	// Dead-letter count.
@@ -108,7 +120,7 @@ func (h *Handler) MonitoringHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // queueDepth returns the number of events waiting in the Redis queue, or 0 on error.
-func (h *Handler) queueDepth(ctx context.Context) int64 {
+func (h *Handler) queueDepth(ctx context.Context) (int64, bool) {
 	// The queue interface doesn't expose depth; call the Redis LLEN directly
 	// through the typed queue if it supports it, otherwise return 0.
 	type depthed interface {
@@ -117,8 +129,8 @@ func (h *Handler) queueDepth(ctx context.Context) int64 {
 	if d, ok := h.queue.(depthed); ok {
 		n, err := d.Depth(ctx)
 		if err == nil {
-			return n
+			return n, true
 		}
 	}
-	return 0
+	return 0, false
 }

@@ -22,10 +22,10 @@ export function CustomerSummaryPanel({ scope }: { scope: PanelScope }) {
     <Panel title="Customers" loading={p.loading} error={p.error} onRetry={p.reload}>
       {c && (
         <div className="stat-grid">
-          <StatCard label="Customers" value={formatCompactNumber(c.total_customers)} fullValue={formatNumber(c.total_customers)} accent="blue" sub="who ordered in this period" />
-          <StatCard label="New" value={formatCompactNumber(c.new_customers)} fullValue={formatNumber(c.new_customers)} accent="green" sub={`${c.new_customer_rate_pct}% of customers`} />
-          <StatCard label="Returning" value={formatCompactNumber(c.returning_customers)} fullValue={formatNumber(c.returning_customers)} />
-          <StatCard label="Avg lifetime value" value={formatCompactCurrency(c.avg_ltv)} fullValue={formatCurrency(c.avg_ltv)} accent="green" />
+          <StatCard label="Customers" numericValue={c.total_customers} value={formatCompactNumber(c.total_customers)} fullValue={formatNumber(c.total_customers)} accent="blue" sub="who ordered in this period" />
+          <StatCard label="New" numericValue={c.new_customers} value={formatCompactNumber(c.new_customers)} fullValue={formatNumber(c.new_customers)} accent="green" sub={`${c.new_customer_rate_pct}% of customers`} />
+          <StatCard label="Returning" numericValue={c.returning_customers} value={formatCompactNumber(c.returning_customers)} fullValue={formatNumber(c.returning_customers)} />
+          <StatCard label="Avg lifetime value" numericValue={c.avg_ltv} currency={'INR'} value={formatCompactCurrency(c.avg_ltv)} fullValue={formatCurrency(c.avg_ltv)} accent="green" />
           <StatCard label="Orders per customer" value={Math.abs(c.avg_orders_per_customer) >= 1000 ? formatCompactNumber(c.avg_orders_per_customer) : c.avg_orders_per_customer.toFixed(2)} fullValue={c.avg_orders_per_customer.toFixed(2)} />
         </div>
       )}

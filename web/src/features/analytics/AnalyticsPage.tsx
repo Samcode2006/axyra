@@ -171,19 +171,19 @@ function FreshnessAndSummary({ scope }: { scope: PanelScope }) {
     <>
       {f && (
         <div className={`freshness-strip ${f.is_healthy ? 'freshness-strip--ok' : 'freshness-strip--warn'}`}>
-          Last event: <strong>{relativeTime(f.last_processed_at)}</strong>
-          &nbsp;·&nbsp; Age: <strong>{f.lag_seconds.toFixed(0)}s</strong>
-          &nbsp;·&nbsp; LSN: <code>{f.last_lsn}</code>
-          {!f.is_healthy && <strong>&nbsp;·&nbsp; No events for over 5 minutes</strong>}
+          <strong>{f.activity_state === 'idle' ? 'No recent activity' : f.activity_state === 'waiting' ? 'Waiting for the first event' : f.activity_state === 'delayed' ? 'Processing delay detected' : 'Receiving events'}</strong>
+          {f.last_processed_at && <> ? Last processed: {relativeTime(f.last_processed_at)}</>}
+          {/* {f.lag_seconds != null && <> ? Last event delay: {f.lag_seconds.toFixed(1)}s</>} */}
+          {/* <span className="hint"> ? Live refresh every 3 seconds</span> */}
         </div>
       )}
       <Panel title="Summary" loading={summary.loading} error={summary.error} onRetry={summary.reload}>
         {s && (
           <div className="stat-grid">
-            <StatCard label="Total orders" value={formatCompactNumber(s.total_orders)} fullValue={formatNumber(s.total_orders)} accent="blue" />
-            <StatCard label="Revenue" value={formatCompactCurrency(s.total_revenue, s.currency)} fullValue={formatCurrency(s.total_revenue, s.currency)} accent="green" />
-            <StatCard label="Active orders" value={formatCompactNumber(s.active_orders)} fullValue={formatNumber(s.active_orders)} />
-            <StatCard label="Cancelled" value={formatCompactNumber(s.cancelled_orders)} fullValue={formatNumber(s.cancelled_orders)} sub={`${cancelRate}% of orders`} accent="red" />
+            <StatCard label="Total orders" numericValue={s.total_orders} value={formatCompactNumber(s.total_orders)} fullValue={formatNumber(s.total_orders)} accent="blue" />
+            <StatCard label="Revenue" numericValue={s.total_revenue} currency={s.currency ?? 'INR'} value={formatCompactCurrency(s.total_revenue, s.currency)} fullValue={formatCurrency(s.total_revenue, s.currency)} accent="green" />
+            <StatCard label="Active orders" numericValue={s.active_orders} value={formatCompactNumber(s.active_orders)} fullValue={formatNumber(s.active_orders)} />
+            <StatCard label="Cancelled" numericValue={s.cancelled_orders} value={formatCompactNumber(s.cancelled_orders)} fullValue={formatNumber(s.cancelled_orders)} sub={`${cancelRate}% of orders`} accent="red" />
           </div>
         )}
       </Panel>

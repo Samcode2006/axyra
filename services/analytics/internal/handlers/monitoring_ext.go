@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"net/http"
 	"time"
 )
@@ -182,9 +181,7 @@ func (h *Handler) MonitoringDetail(w http.ResponseWriter, r *http.Request) {
 	agents := make([]AgentLag, 0)
 	rows, err = h.db.QueryContext(ctx, `
 		SELECT g.id, g.name, a.name, COALESCE(c.confirmed_lsn, '0/0'), COALESCE(w.last_lsn, '0/0'),
-		       g.last_seen_at, w.last_processed_at,
-		       CASE WHEN w.last_processed_at IS NULL THEN NULL
-		            ELSE GREATEST(EXTRACT(EPOCH FROM (NOW() - w.last_processed_at)), 0) END,
+		       g.last_seen_at, e.processed_at, e.delay_seconds,
 		       CASE WHEN g.status = 'error' THEN 'error'
 		            WHEN g.last_seen_at IS NULL OR g.last_seen_at < NOW() - INTERVAL '5 minutes' THEN 'disconnected'
 		            ELSE g.status END
@@ -198,6 +195,12 @@ func (h *Handler) MonitoringDetail(w http.ResponseWriter, r *http.Request) {
 			LIMIT 1
 		) c ON TRUE
 		LEFT JOIN processing_watermarks w ON w.agent_id = g.id
+        LEFT JOIN LATERAL (
+          SELECT p.processed_at, GREATEST(EXTRACT(EPOCH FROM (p.processed_at-r.occurred_at)),0) AS delay_seconds
+          FROM raw_events r JOIN processed_events p ON p.event_id=r.event_id AND p.tenant_id=r.tenant_id
+          WHERE r.agent_id=g.id AND p.status='processed' AND ($1::text IS NULL OR r.tenant_id=$1)
+          ORDER BY r.id DESC LIMIT 1
+        ) e ON TRUE
 		WHERE ($1::text IS NULL OR a.organization_id = (SELECT organization_id FROM tenants WHERE id = $1))
 		ORDER BY g.created_at, g.id LIMIT 200`, tenantArg)
 	if err != nil {
@@ -242,6 +245,7 @@ type TenantAlert struct {
 // TenantHealth is the Overview page's per-tenant summary.
 type TenantHealth struct {
 	TenantID          string        `json:"tenant_id"`
+	ActivityState     string        `json:"activity_state"`
 	LastEventAt       *time.Time    `json:"last_event_at,omitempty"`
 	LagSeconds        *float64      `json:"lag_seconds,omitempty"`
 	DeadLetterCount   int64         `json:"dead_letter_count"`
@@ -267,26 +271,14 @@ func (h *Handler) TenantHealthHandler(w http.ResponseWriter, r *http.Request) {
 
 	out := TenantHealth{TenantID: tenantID, Alerts: []TenantAlert{}}
 
-	// Freshness comes from the tenant's own events. processing_watermarks has one
-	// row per agent whose tenant_id is overwritten by whichever tenant's event
-	// arrived last, so it is wrong for an agent that serves several tenants.
-	var last sql.NullTime
-	err := h.db.QueryRowContext(ctx,
-		`SELECT MAX(occurred_at) FROM raw_events WHERE tenant_id = $1`, tenantID).Scan(&last)
+	freshness, err := h.tenantFreshness(ctx, tenantID)
 	if err != nil {
 		queryFailed(w, r, err)
 		return
 	}
-	if last.Valid {
-		t := last.Time
-		out.LastEventAt = &t
-		lag := time.Since(t).Seconds()
-		if lag < 0 {
-			lag = 0
-		}
-		lag = round1(lag)
-		out.LagSeconds = &lag
-	}
+	out.LastEventAt = freshness.LastProcessedAt
+	out.LagSeconds = freshness.LagSeconds
+	out.ActivityState = freshness.ActivityState
 
 	if err := h.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM dead_letter_events WHERE tenant_id = $1 AND replayed_at IS NULL`, tenantID).
@@ -335,8 +327,8 @@ func (h *Handler) TenantHealthHandler(w http.ResponseWriter, r *http.Request) {
 	if out.ReturnRatePct > alertReturnRatePct && live >= 20 {
 		out.Alerts = append(out.Alerts, TenantAlert{"high_returns", "warning", "Return rate above 15% in the last 7 days"})
 	}
-	if out.LagSeconds != nil && *out.LagSeconds > alertLagSeconds {
-		out.Alerts = append(out.Alerts, TenantAlert{"stale_data", "warning", "No events processed for more than 5 minutes"})
+	if out.ActivityState == "delayed" {
+		out.Alerts = append(out.Alerts, TenantAlert{"processing_delay", "warning", "The latest event took more than 5 minutes to reach analytics"})
 	}
 	if out.DeadLetterCount > 0 {
 		out.Alerts = append(out.Alerts, TenantAlert{"dead_letter", "error", "Unresolved failed events in the dead-letter queue"})

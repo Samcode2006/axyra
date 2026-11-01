@@ -91,13 +91,13 @@ export default function MonitoringDetailPanels({ refreshKey }: { refreshKey: num
         </Panel>
       </div>
 
-      <Panel title="Agent replication lag" loading={detail.loading} error={detail.error} onRetry={detail.reload}>
+      <Panel title="Agent activity and last event delay" loading={detail.loading} error={detail.error} onRetry={detail.reload}>
         {(d?.agents.length ?? 0) === 0 ? (
           <Empty>No agents registered.</Empty>
         ) : (
           <table className="table">
             <thead>
-              <tr><th>Agent</th><th>Application</th><th>Confirmed LSN</th><th>Last seen</th><th>Lag</th><th>Status</th></tr>
+              <tr><th>Agent</th><th>Application</th><th>Confirmed LSN</th><th>Last seen</th><th>Last event delay</th><th>Status</th></tr>
             </thead>
             <tbody>
               {d!.agents.map((a) => (

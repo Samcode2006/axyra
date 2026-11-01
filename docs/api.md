@@ -1,5 +1,24 @@
 # Axyra REST API Reference
 
+## Freshness and live metrics
+
+Status exposes `activity_state`: `waiting` (no completed events), `active`,
+`idle` (no completion for five minutes), or `delayed` (a recent completion
+with at least five minutes of event-to-processing delay). `last_processed_at`
+is the actual processing timestamp; it and `lag_seconds` are null before the
+first completed event. `lag_seconds` measures the last completed event's
+processing timestamp minus its source event timestamp, clamped to zero for
+clock skew. It does not grow while a store is idle, and is not a measurement
+of pending source WAL or queued events. Agent connectivity remains a separate
+heartbeat-based signal. Idle time alone no longer raises a tenant health alert.
+
+Overview, Analytics and Monitoring refresh visible metrics every three seconds
+after the previous request finishes. Hidden tabs pause polling and refresh on
+return. Panel state is local; unchanged responses skip state updates, background
+refreshes retain content, and numeric card animations update only the value
+component. Animations follow server values in either direction and respect
+reduced-motion preferences. Figures remain limited to the selected date range.
+
 ## Rebuilding analytics
 
 `POST /v1/analytics/rebuild?tenant_id=...` reconstructs derived tables from the

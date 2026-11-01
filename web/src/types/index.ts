@@ -149,10 +149,11 @@ export interface BreakdownResponse {
 
 export interface AnalyticsStatus {
   tenant_id: string;
-  last_processed_at: string;
+  last_processed_at: string | null;
   last_lsn: string;
-  lag_seconds: number;
+  lag_seconds: number | null;
   is_healthy: boolean;
+  activity_state: 'waiting' | 'idle' | 'active' | 'delayed';
 }
 
 export interface DeadLetterEvent {
@@ -269,6 +270,7 @@ export interface MonitoringStats {
   events_last_5m: number;
   last_processed_at?: string;
   worker_healthy: boolean;
+  worker_state: 'unknown' | 'idle' | 'processing' | 'stalled';
   dead_letter_count: number;
   processed_last_5m: number;
   latency_p50_ms?: number;
@@ -390,6 +392,7 @@ export interface TenantAlert {
 }
 
 export interface TenantHealth {
+  activity_state: 'waiting' | 'idle' | 'active' | 'delayed';
   tenant_id: string;
   last_event_at?: string;
   lag_seconds?: number;

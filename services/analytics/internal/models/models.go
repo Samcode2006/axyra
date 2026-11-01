@@ -89,9 +89,10 @@ type BreakdownResponse struct {
 }
 
 type AnalyticsStatus struct {
-	TenantID        string    `json:"tenant_id"`
-	LastProcessedAt time.Time `json:"last_processed_at"`
-	LastLSN         string    `json:"last_lsn"`
-	LagSeconds      float64   `json:"lag_seconds"`
-	IsHealthy       bool      `json:"is_healthy"`
+	TenantID        string     `json:"tenant_id"`
+	LastProcessedAt *time.Time `json:"last_processed_at"`
+	LastLSN         string     `json:"last_lsn"`
+	LagSeconds      *float64   `json:"lag_seconds"`
+	ActivityState   string     `json:"activity_state"`
+	IsHealthy       bool       `json:"is_healthy"`
 }

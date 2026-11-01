@@ -27,7 +27,8 @@ export function Panel({ title, loading, error, onRetry, actions, children }: Pan
             </button>
           )}
         </div>
-      ) : loading ? (
+      ) : null}
+      {loading ? (
         <Spinner />
       ) : (
         children

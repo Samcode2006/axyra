@@ -176,7 +176,7 @@ func (w *Worker) ProcessEvent(ctx context.Context, e *models.EventEnvelope) erro
 	// 6. Mark processed_events
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO processed_events (event_id, tenant_id, processed_at, status)
-		VALUES ($1, $2, NOW(), 'processed')
+		VALUES ($1, $2, clock_timestamp(), 'processed')
 		ON CONFLICT (event_id) DO NOTHING;
 	`, e.EventID, e.TenantID)
 	if err != nil {

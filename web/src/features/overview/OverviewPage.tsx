@@ -1,16 +1,17 @@
-import { useCallback, useState } from 'react';
+import { useRef } from 'react';
 import { StatCard } from '../../components/StatCard';
 import { Badge } from '../../components/Badge';
 import { Spinner, ErrorMsg } from '../../components/Feedback';
-import { analytics, tenants, agents, errMsg } from '../../lib/api';
-import { useLoadEffect } from '../../lib/useLoadEffect';
+import { analytics, tenants, agents } from '../../lib/api';
+import { usePanel } from '../analytics/panels/usePanel';
 import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
-import type { Agent, CustomerSummary, RevenueBreakdown, Tenant, TenantAlert, TenantHealth } from '../../types';
+import type { CustomerSummary, RevenueBreakdown, Tenant, TenantAlert, TenantHealth } from '../../types';
 
 /** The analytics API is per tenant, so organization-wide figures fan out. Capped to bound the request count. */
 const MAX_TENANTS = 12;
 
 interface TenantRow {
+  refreshFailed?: boolean;
   tenant: Tenant;
   health?: TenantHealth;
   revenue?: RevenueBreakdown;
@@ -20,18 +21,10 @@ interface TenantRow {
 const ok = <T,>(r: PromiseSettledResult<{ data: T }>): T | undefined => (r.status === 'fulfilled' ? r.value.data : undefined);
 
 export default function OverviewPage() {
-  const [rows, setRows] = useState<TenantRow[]>([]);
-  const [tenantTotal, setTenantTotal] = useState(0);
-  const [agentList, setAgentList] = useState<Agent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
+  const previous = useRef(new Map<string, TenantRow>());
+  const live = usePanel(async () => {
       const [t, a] = await Promise.all([tenants.list({ per_page: 200 }), agents.list()]);
       const all = t.data.data ?? [];
-      setTenantTotal(t.data.total);
-      setAgentList(a.data);
 
       const { from, to } = utcDayRange(7);
       const shown = all.filter((x) => x.status === 'active').slice(0, MAX_TENANTS);
@@ -43,24 +36,20 @@ export default function OverviewPage() {
             analytics.revenue({ from, to, tenant_id: tenant.id }),
             analytics.customerSummary({ from, to, tenant_id: tenant.id }),
           ]);
-          return { tenant, health: ok(h), revenue: ok(r), customers: ok(c) };
+          const cached = previous.current.get(tenant.id);
+          const row = { tenant, health: ok(h) ?? cached?.health, revenue: ok(r) ?? cached?.revenue, customers: ok(c) ?? cached?.customers };
+          previous.current.set(tenant.id, row);
+          return { ...row, refreshFailed: [h, r, c].some((result) => result.status === 'rejected') };
         })
       );
       // Tenants that are not active still belong in the health table.
       const inactive = all.filter((x) => x.status !== 'active').map((tenant): TenantRow => ({ tenant }));
-      setRows([...detail, ...inactive]);
-      setError(null);
-    } catch (err) {
-      setError(errMsg(err, 'Could not load overview data. Are the services running?'));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return { rows: [...detail, ...inactive], tenantTotal: t.data.total, agentList: a.data };
+  }, 'overview', 3000);
 
-  useLoadEffect(load);
-
-  if (loading) return <Spinner />;
-  if (error) return <ErrorMsg message={error} />;
+  if (live.loading) return <Spinner />;
+  if (!live.data) return <ErrorMsg message={live.error ?? 'Could not load overview'} />;
+  const { rows, tenantTotal, agentList } = live.data;
 
   const withData = rows.filter((r) => r.revenue);
   const gross = withData.reduce((s, r) => s + (r.revenue?.gross_revenue ?? 0), 0);
@@ -90,6 +79,9 @@ export default function OverviewPage() {
         {latest && <span className="freshness-badge">Latest event {relativeTime(latest)}</span>}
       </div>
 
+      {live.error && <ErrorMsg message={live.error} />}
+      {rows.some((row) => row.refreshFailed) && <ErrorMsg message="Some store metrics could not refresh. Previous values are retained where available." />}
+      <p className="hint">Live metrics ? refresh every 3 seconds</p>
       {alerts.length > 0 && (
         <section aria-label="Active alerts">
           {alerts.map((a) => (
@@ -101,14 +93,14 @@ export default function OverviewPage() {
       )}
 
       <div className="stat-grid">
-        <StatCard label="Gross revenue (7d)" value={formatCompactCurrency(gross)} fullValue={formatCurrency(gross)} accent="green" />
-        <StatCard label="Net revenue (7d)" value={formatCompactCurrency(net)} fullValue={formatCurrency(net)} accent="green" sub="after discounts" />
+        <StatCard label="Gross revenue (7d)" numericValue={gross} currency={'INR'} value={formatCompactCurrency(gross)} fullValue={formatCurrency(gross)} accent="green" />
+        <StatCard label="Net revenue (7d)" numericValue={net} currency={'INR'} value={formatCompactCurrency(net)} fullValue={formatCurrency(net)} accent="green" sub="after discounts" />
         <StatCard label="Avg order value (7d)" value={orders > 0 ? formatCompactCurrency(gross / orders) : '—'} fullValue={orders > 0 ? formatCurrency(gross / orders) : undefined} accent="blue" sub={`${formatCompactNumber(orders)} orders`} />
-        <StatCard label="New customers (7d)" value={formatCompactNumber(newCustomers)} fullValue={formatNumber(newCustomers)} accent="blue" />
-        <StatCard label="Active tenants" value={formatCompactNumber(activeTenants)} fullValue={formatNumber(activeTenants)} sub={`${formatCompactNumber(tenantTotal)} total`} accent="blue" />
+        <StatCard label="New customers (7d)" numericValue={newCustomers} value={formatCompactNumber(newCustomers)} fullValue={formatNumber(newCustomers)} accent="blue" />
+        <StatCard label="Active tenants" numericValue={activeTenants} value={formatCompactNumber(activeTenants)} fullValue={formatNumber(activeTenants)} sub={`${formatCompactNumber(tenantTotal)} total`} accent="blue" />
         <StatCard
           label="Connected agents"
-          value={formatCompactNumber(connectedAgents)}
+          numericValue={connectedAgents} value={formatCompactNumber(connectedAgents)}
           fullValue={formatNumber(connectedAgents)}
           sub={`${formatCompactNumber(agentList.length)} total`}
           accent={connectedAgents > 0 ? 'green' : 'amber'}
@@ -135,7 +127,7 @@ export default function OverviewPage() {
               <th>Tenant</th>
               <th>Plan</th>
               <th>Last event</th>
-              <th>Age</th>
+              <th>Last event delay</th>
               <th>Dead-letter</th>
               <th>Status</th>
             </tr>
@@ -154,6 +146,7 @@ export default function OverviewPage() {
                 </td>
                 <td>
                   <Badge status={tenant.status} />
+                  {health && <span className="hint"> ? {health.activity_state === 'idle' ? 'No recent activity' : health.activity_state}</span>}
                   {health && health.alerts.length > 0 && <span className="badge badge--amber" style={{ marginLeft: 6 }}>{health.alerts.length} alert{health.alerts.length > 1 ? 's' : ''}</span>}
                 </td>
               </tr>

@@ -22,13 +22,13 @@ export function RevenueStrip({ scope }: { scope: PanelScope }) {
     <Panel title="Revenue breakdown" loading={p.loading} error={p.error} onRetry={p.reload}>
       {r && (
         <div className="stat-grid">
-          <StatCard label="Gross revenue" value={formatCompactCurrency(r.gross_revenue, cur)} fullValue={formatCurrency(r.gross_revenue, cur)} accent="green" />
-          <StatCard label="Discounts" value={formatCompactCurrency(r.total_discount, cur)} fullValue={formatCurrency(r.total_discount, cur)} accent="amber" />
-          <StatCard label="Net revenue" value={formatCompactCurrency(r.net_revenue, cur)} fullValue={formatCurrency(r.net_revenue, cur)} accent="green" sub="gross less discounts" />
-          <StatCard label="Tax collected" value={formatCompactCurrency(r.total_tax, cur)} fullValue={formatCurrency(r.total_tax, cur)} />
-          <StatCard label="Shipping" value={formatCompactCurrency(r.total_shipping, cur)} fullValue={formatCurrency(r.total_shipping, cur)} />
-          <StatCard label="Avg order value" value={formatCompactCurrency(r.avg_order_value, cur)} fullValue={formatCurrency(r.avg_order_value, cur)} accent="blue" sub={`${formatCompactNumber(r.active_orders)} orders`} />
-          <StatCard label="Units sold" value={formatCompactNumber(r.total_quantity)} fullValue={formatNumber(r.total_quantity)} />
+          <StatCard label="Gross revenue" numericValue={r.gross_revenue} currency={cur ?? 'INR'} value={formatCompactCurrency(r.gross_revenue, cur)} fullValue={formatCurrency(r.gross_revenue, cur)} accent="green" />
+          <StatCard label="Discounts" numericValue={r.total_discount} currency={cur ?? 'INR'} value={formatCompactCurrency(r.total_discount, cur)} fullValue={formatCurrency(r.total_discount, cur)} accent="amber" />
+          <StatCard label="Net revenue" numericValue={r.net_revenue} currency={cur ?? 'INR'} value={formatCompactCurrency(r.net_revenue, cur)} fullValue={formatCurrency(r.net_revenue, cur)} accent="green" sub="gross less discounts" />
+          <StatCard label="Tax collected" numericValue={r.total_tax} currency={cur ?? 'INR'} value={formatCompactCurrency(r.total_tax, cur)} fullValue={formatCurrency(r.total_tax, cur)} />
+          <StatCard label="Shipping" numericValue={r.total_shipping} currency={cur ?? 'INR'} value={formatCompactCurrency(r.total_shipping, cur)} fullValue={formatCurrency(r.total_shipping, cur)} />
+          <StatCard label="Avg order value" numericValue={r.avg_order_value} currency={cur ?? 'INR'} value={formatCompactCurrency(r.avg_order_value, cur)} fullValue={formatCurrency(r.avg_order_value, cur)} accent="blue" sub={`${formatCompactNumber(r.active_orders)} orders`} />
+          <StatCard label="Units sold" numericValue={r.total_quantity} value={formatCompactNumber(r.total_quantity)} fullValue={formatNumber(r.total_quantity)} />
         </div>
       )}
     </Panel>
