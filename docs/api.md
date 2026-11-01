@@ -1,5 +1,15 @@
 # Axyra REST API Reference
 
+The admin Overview reuses the Analytics dashboard with `scope=organization` on
+its read requests. The control plane derives the organization from the signed-in
+admin and replaces any supplied organization/tenant selectors. Only the dashboard
+read endpoints accept this mode; rebuild and operational endpoints do not.
+The database resolves all registered tenants in that organization at query time,
+without pagination limits or an active-only filter. Totals and time buckets are
+combined before ranking or calculating averages and percentages. Customer and
+product IDs remain tenant-local, represented as `tenant_id/id` in combined rankings.
+The Analytics page retains its selected-tenant view; the operator Overview is unchanged.
+
 Managed local PostgreSQL creation is available through `POST /v1/tenants` with
 `database_mode: "managed"`. It returns 202 and a provisioning tenant; existing
 database registration still returns 201. Organization-scoped progress and retry

@@ -57,7 +57,7 @@ func (h *Handler) OrderBreakdown(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT ` + dim.column + ` AS grp, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS rev
 		FROM order_state
-		WHERE tenant_id = $1`
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1))`
 	args := []interface{}{tenantID}
 
 	// With no range the whole order_state is reported, as before.

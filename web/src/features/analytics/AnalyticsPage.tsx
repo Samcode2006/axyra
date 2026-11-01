@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { analytics, tenants as tenantsApi } from '../../lib/api';
+import { analytics, ORGANIZATION_SCOPE, tenants as tenantsApi } from '../../lib/api';
 import { StatCard } from '../../components/StatCard';
 import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
 import type { AnalyticsStatus, BreakdownGroup, Tenant } from '../../types';
@@ -28,7 +28,7 @@ const BREAKDOWNS: Array<{ id: BreakdownGroup; label: string }> = [
   { id: 'return_reason', label: 'Return reason' },
 ];
 
-export default function AnalyticsPage() {
+export default function AnalyticsPage({ organization = false }: { organization?: boolean }) {
   const [days, setDays] = useState<1 | 7 | 30 | 'custom'>(7);
   const [customFrom, setCustomFrom] = useState(() => utcDayRange(7).from.slice(0, 10));
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
@@ -53,15 +53,15 @@ export default function AnalyticsPage() {
       .catch(() => setTenantList([]));
   }, []);
 
-  const scope: PanelScope = { from: range.from, to: range.to, tenantId: tenantId || undefined };
+  const scope: PanelScope = { from: range.from, to: range.to, tenantId: organization ? ORGANIZATION_SCOPE : tenantId || undefined };
   const tenantName = tenantList.find((t) => t.id === tenantId)?.name;
 
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Analytics{tenantName ? <span className="hint"> · {tenantName}</span> : null}</h1>
+        <h1>{organization ? 'Overview' : 'Analytics'}{organization ? <span className="hint"> - All tenants</span> : tenantName ? <span className="hint"> · {tenantName}</span> : null}</h1>
         <div className="controls">
-          {tenantList.length > 1 && (
+          {!organization && tenantList.length > 1 && (
             <>
               <span className="control-label">Tenant:</span>
               <select className="select-sm" value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
@@ -105,6 +105,7 @@ export default function AnalyticsPage() {
         </form>
       )}
 
+      {organization && <p className="hint">Combined data for every tenant in your organization. Customer and product IDs are scoped to their tenant.</p>}
       <p className="hint">Ranges cover whole UTC days. Customer, geography, payment and return figures are by the day an order was created.</p>
 
       {/* Waiting for the tenant list avoids a first request with no tenant and a second with one. */}

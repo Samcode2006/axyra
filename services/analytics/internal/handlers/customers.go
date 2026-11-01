@@ -47,17 +47,17 @@ func (h *Handler) CustomerSummaryHandler(w http.ResponseWriter, r *http.Request)
 	var orders int64
 	err := h.db.QueryRowContext(r.Context(), `
 		WITH buyers AS (
-			SELECT customer_id, COUNT(*) AS n
+			SELECT tenant_id, customer_id, COUNT(*) AS n
 			FROM order_state
-			WHERE tenant_id = $1 AND has_extended AND customer_id <> '' AND status <> 'cancelled'
+			WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND has_extended AND customer_id <> '' AND status <> 'cancelled'
 			  AND occurred_at >= $2 AND occurred_at < $3
-			GROUP BY customer_id
+			GROUP BY tenant_id, customer_id
 		)
 		SELECT COUNT(*), COALESCE(SUM(b.n), 0)::bigint,
 		       COUNT(*) FILTER (WHERE ca.first_order_at >= $2),
 		       COALESCE(AVG(ca.total_spend), 0)
 		FROM buyers b
-		LEFT JOIN customer_aggregates ca ON ca.tenant_id = $1 AND ca.customer_id = b.customer_id`,
+		LEFT JOIN customer_aggregates ca ON ca.tenant_id = b.tenant_id AND ca.customer_id = b.customer_id`,
 		tenantID, win.Start, win.End).Scan(&out.TotalCustomers, &orders, &out.NewCustomers, &out.AvgLTV)
 	if err != nil {
 		queryFailed(w, r, err)
@@ -111,21 +111,21 @@ func (h *Handler) TopBuyers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		query = `
-			SELECT s.customer_id, COALESCE(ca.customer_tier, 'regular'), COUNT(*), SUM(s.amount), SUM(s.discount_amount),
+			SELECT CASE WHEN left($1,4)='org:' THEN s.tenant_id || '/' || s.customer_id ELSE s.customer_id END, COALESCE(ca.customer_tier, 'regular'), COUNT(*), SUM(s.amount), SUM(s.discount_amount),
 			       MIN(s.occurred_at), MAX(s.occurred_at)
 			FROM order_state s
 			LEFT JOIN customer_aggregates ca ON ca.tenant_id = s.tenant_id AND ca.customer_id = s.customer_id
-			WHERE s.tenant_id = $1 AND s.has_extended AND s.customer_id <> '' AND s.status <> 'cancelled'
+			WHERE s.tenant_id IN (SELECT analytics_scope_tenants($1)) AND s.has_extended AND s.customer_id <> '' AND s.status <> 'cancelled'
 			  AND s.occurred_at >= $2 AND s.occurred_at < $3
-			GROUP BY s.customer_id, ca.customer_tier
+			GROUP BY s.tenant_id, s.customer_id, ca.customer_tier
 			ORDER BY SUM(s.amount) DESC, s.customer_id
 			LIMIT $4`
 		args = []interface{}{tenantID, win.Start, win.End, limit}
 	} else {
 		query = `
-			SELECT customer_id, customer_tier, order_count, total_spend, total_discount, first_order_at, last_order_at
+			SELECT CASE WHEN left($1,4)='org:' THEN tenant_id || '/' || customer_id ELSE customer_id END, customer_tier, order_count, total_spend, total_discount, first_order_at, last_order_at
 			FROM customer_aggregates
-			WHERE tenant_id = $1 AND order_count > 0
+			WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND order_count > 0
 			ORDER BY total_spend DESC, customer_id
 			LIMIT $2`
 		args = []interface{}{tenantID, limit}
@@ -195,7 +195,7 @@ func (h *Handler) CustomerCohorts(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(SUM(total_revenue) FILTER (WHERE customer_type = 'new'), 0),
 		       COALESCE(SUM(total_revenue) FILTER (WHERE customer_type = 'returning'), 0)
 		FROM cohort_daily
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date
 		GROUP BY 1
 		ORDER BY 1`,
 		tenantID, win.Start, win.End, interval)

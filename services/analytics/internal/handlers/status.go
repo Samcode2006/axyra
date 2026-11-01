@@ -33,7 +33,7 @@ func (h *Handler) tenantFreshness(ctx context.Context, tenantID string) (models.
   SELECT r.lsn, p.processed_at,
          GREATEST(EXTRACT(EPOCH FROM (p.processed_at-r.occurred_at)),0)
   FROM raw_events r JOIN processed_events p ON p.event_id=r.event_id AND p.tenant_id=r.tenant_id
-  WHERE r.tenant_id=$1 AND p.status='processed'
+  WHERE r.tenant_id IN (SELECT analytics_scope_tenants($1)) AND p.status='processed'
   ORDER BY r.id DESC LIMIT 1`, tenantID).Scan(&out.LastLSN, &at, &delay)
 	if err == sql.ErrNoRows {
 		return out, nil

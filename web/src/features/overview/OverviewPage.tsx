@@ -1,8 +1,9 @@
+import AnalyticsPage from '../analytics/AnalyticsPage';
 import { useRef } from 'react';
 import { StatCard } from '../../components/StatCard';
 import { Badge } from '../../components/Badge';
 import { Spinner, ErrorMsg } from '../../components/Feedback';
-import { analytics, tenants, agents } from '../../lib/api';
+import { analytics, tenants, agents, auth } from '../../lib/api';
 import { usePanel } from '../analytics/panels/usePanel';
 import { formatCompactCurrency, formatCompactNumber, formatCurrency, formatNumber, relativeTime, utcDayRange } from '../../lib/utils';
 import type { CustomerSummary, RevenueBreakdown, Tenant, TenantAlert, TenantHealth } from '../../types';
@@ -21,6 +22,10 @@ interface TenantRow {
 const ok = <T,>(r: PromiseSettledResult<{ data: T }>): T | undefined => (r.status === 'fulfilled' ? r.value.data : undefined);
 
 export default function OverviewPage() {
+ return auth.isOperator() ? <OperatorOverview /> : <AnalyticsPage organization />;
+}
+
+function OperatorOverview() {
   const previous = useRef(new Map<string, TenantRow>());
   const live = usePanel(async () => {
       const [t, a] = await Promise.all([tenants.list({ per_page: 200 }), agents.list()]);

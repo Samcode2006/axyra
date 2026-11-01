@@ -51,7 +51,7 @@ func (h *Handler) GeoBreakdown(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT `+cols+`, SUM(order_count)::bigint, SUM(total_revenue)
 		FROM geo_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date
 		GROUP BY 1, 2, 3
 		HAVING SUM(order_count) <> 0
 		ORDER BY SUM(total_revenue) DESC, 1, 2, 3
@@ -90,7 +90,7 @@ func (h *Handler) GeoBreakdown(w http.ResponseWriter, r *http.Request) {
 	var all float64
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(total_revenue), 0) FROM geo_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date`,
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date`,
 		tenantID, win.Start, win.End).Scan(&all); err != nil {
 		queryFailed(w, r, err)
 		return
@@ -131,7 +131,7 @@ func (h *Handler) ChannelBreakdown(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT channel, referrer_source, SUM(order_count)::bigint, SUM(total_revenue), SUM(new_customers)::bigint
 		FROM channel_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date
 		GROUP BY channel, referrer_source
 		HAVING SUM(order_count) <> 0
 		ORDER BY SUM(total_revenue) DESC, channel, referrer_source`, tenantID, win.Start, win.End)
@@ -201,7 +201,7 @@ func (h *Handler) PaymentBreakdown(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(SUM(order_count) FILTER (WHERE payment_status = 'chargeback'), 0)::bigint,
 		       SUM(total_amount)
 		FROM payment_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date
 		GROUP BY payment_method
 		HAVING SUM(order_count) <> 0
 		ORDER BY SUM(order_count) DESC, payment_method`, tenantID, win.Start, win.End)
@@ -265,7 +265,7 @@ func (h *Handler) ReturnsSummary(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(return_count), 0)::bigint, COALESCE(SUM(refund_amount), 0)
 		FROM return_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date`,
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date`,
 		tenantID, win.Start, win.End).Scan(&totalReturns, &refund); err != nil {
 		queryFailed(w, r, err)
 		return
@@ -274,7 +274,7 @@ func (h *Handler) ReturnsSummary(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(order_count), 0)::bigint
 		FROM fulfillment_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date AND fulfillment_status <> 'cancelled'`,
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date AND fulfillment_status <> 'cancelled'`,
 		tenantID, win.Start, win.End).Scan(&orders); err != nil {
 		queryFailed(w, r, err)
 		return
@@ -283,7 +283,7 @@ func (h *Handler) ReturnsSummary(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT return_reason, SUM(return_count)::bigint
 		FROM return_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date
 		GROUP BY return_reason
 		HAVING SUM(return_count) > 0
 		ORDER BY SUM(return_count) DESC, return_reason
@@ -353,7 +353,7 @@ func (h *Handler) FulfillmentFunnel(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT fulfillment_status, SUM(order_count)::bigint
 		FROM fulfillment_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date
 		GROUP BY fulfillment_status`, tenantID, win.Start, win.End)
 	if err != nil {
 		queryFailed(w, r, err)
@@ -426,7 +426,7 @@ func (h *Handler) DiscountSummary(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(uses), 0)::bigint, COALESCE(SUM(total_discount), 0)
 		FROM discount_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date`,
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date`,
 		tenantID, win.Start, win.End).Scan(&withDiscount, &totalDiscount); err != nil {
 		queryFailed(w, r, err)
 		return
@@ -435,7 +435,7 @@ func (h *Handler) DiscountSummary(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(order_count), 0)::bigint
 		FROM fulfillment_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date AND fulfillment_status <> 'cancelled'`,
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date AND fulfillment_status <> 'cancelled'`,
 		tenantID, win.Start, win.End).Scan(&orders); err != nil {
 		queryFailed(w, r, err)
 		return
@@ -444,7 +444,7 @@ func (h *Handler) DiscountSummary(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT discount_code, SUM(uses)::bigint, SUM(total_discount)
 		FROM discount_aggregates
-		WHERE tenant_id = $1 AND bucket >= $2::date AND bucket < $3::date
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket < $3::date
 		GROUP BY discount_code
 		HAVING SUM(uses) > 0
 		ORDER BY SUM(uses) DESC, SUM(total_discount) DESC, discount_code

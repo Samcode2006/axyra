@@ -48,7 +48,21 @@ func (h *Handler) AnalyticsProxy() http.HandlerFunc {
 		if p == nil {
 			return
 		}
-		if !p.IsOperator() {
+		// Never trust a browser-supplied internal organization scope.
+		r.Header.Del("X-Analytics-Organization")
+		if r.URL.Query().Get("scope") == "organization" {
+			if p.IsOperator() || p.OrgID == "" || r.Method != http.MethodGet || !organizationAnalyticsPaths[r.URL.Path] {
+				respondError(w, http.StatusForbidden, "Organization overview is only available for admin dashboard reads")
+				return
+			}
+			q := r.URL.Query()
+			q.Del("tenant_id")
+			q.Del("external_tenant_id")
+			q.Del("organization_id")
+			r.URL.RawQuery = q.Encode()
+			r.Header.Del("X-Tenant-ID")
+			r.Header.Set("X-Analytics-Organization", p.OrgID)
+		} else if !p.IsOperator() {
 			if !h.scopeAnalyticsRequest(w, r, p) {
 				return
 			}
@@ -103,4 +117,17 @@ func (h *Handler) scopeAnalyticsRequest(w http.ResponseWriter, r *http.Request, 
 	r.URL.RawQuery = q.Encode()
 	r.Header.Del("X-Tenant-ID")
 	return true
+}
+
+// Rebuild, metrics configured by users, and operational/admin endpoints cannot
+// opt into this scope. Only the dashboard's read endpoints support aggregation.
+var organizationAnalyticsPaths = map[string]bool{
+	"/v1/analytics/status":         true,
+	"/v1/analytics/orders/summary": true, "/v1/analytics/orders/trend": true,
+	"/v1/analytics/orders/revenue": true, "/v1/analytics/orders/breakdown": true,
+	"/v1/analytics/products/top": true, "/v1/analytics/customers/summary": true,
+	"/v1/analytics/customers/top": true, "/v1/analytics/customers/cohorts": true,
+	"/v1/analytics/geo/breakdown": true, "/v1/analytics/channels/breakdown": true,
+	"/v1/analytics/payments/breakdown": true, "/v1/analytics/returns/summary": true,
+	"/v1/analytics/fulfillment/funnel": true, "/v1/analytics/discounts/summary": true,
 }

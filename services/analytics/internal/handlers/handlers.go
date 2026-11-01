@@ -55,6 +55,10 @@ func (h *Handler) acquireQuery(w http.ResponseWriter, r *http.Request, tenantID,
 
 // resolveRequestTenant extracts and resolves tenant_id from request query/header or default.
 func (h *Handler) resolveRequestTenant(r *http.Request) string {
+	if org := r.Header.Get("X-Analytics-Organization"); org != "" {
+		return "org:" + org
+	}
+
 	// 1. Check query param
 	t := r.URL.Query().Get("tenant_id")
 	if t == "" {

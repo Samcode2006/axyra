@@ -60,7 +60,7 @@ func (h *Handler) TopProducts(w http.ResponseWriter, r *http.Request) {
 		// Aggregate live from order_state. Quantity, discount and returns are
 		// only known for extended (schema v2) orders.
 		query = `
-			SELECT product_id, MAX(product_name), MAX(category),
+			SELECT CASE WHEN left($1,4)='org:' THEN tenant_id || '/' || product_id ELSE product_id END, MAX(product_name), MAX(category),
 			       COUNT(*) FILTER (WHERE status <> 'cancelled'),
 			       COALESCE(SUM(amount) FILTER (WHERE status <> 'cancelled'), 0) AS total_revenue,
 			       COALESCE(SUM(quantity) FILTER (WHERE status <> 'cancelled' AND has_extended), 0)::bigint AS quantity_sold,
@@ -68,16 +68,16 @@ func (h *Handler) TopProducts(w http.ResponseWriter, r *http.Request) {
 			       COUNT(*) FILTER (WHERE status <> 'cancelled' AND has_extended
 			                          AND (status = 'returned' OR fulfillment_status = 'returned')) AS return_count
 			FROM order_state
-			WHERE tenant_id = $1 AND occurred_at >= $2 AND occurred_at < $3 AND product_id <> ''
-			GROUP BY product_id
+			WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND occurred_at >= $2 AND occurred_at < $3 AND product_id <> ''
+			GROUP BY tenant_id, product_id
 			ORDER BY ` + orderBy + `, product_id
 			LIMIT $4`
 		args = []interface{}{tenantID, fromTime, toTime, limit}
 	} else {
 		query = `
-			SELECT product_id, product_name, category, order_count, total_revenue, quantity_sold, total_discount, return_count
+			SELECT CASE WHEN left($1,4)='org:' THEN tenant_id || '/' || product_id ELSE product_id END, product_name, category, order_count, total_revenue, quantity_sold, total_discount, return_count
 			FROM product_aggregates
-			WHERE tenant_id = $1
+			WHERE tenant_id IN (SELECT analytics_scope_tenants($1))
 			ORDER BY ` + orderBy + `, product_id
 			LIMIT $2`
 		args = []interface{}{tenantID, limit}

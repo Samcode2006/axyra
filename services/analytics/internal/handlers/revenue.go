@@ -55,7 +55,7 @@ func (h *Handler) OrderRevenue(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(SUM(total_tax), 0), COALESCE(SUM(total_shipping), 0),
 		       COALESCE(SUM(active_orders), 0)::bigint, COALESCE(SUM(total_quantity), 0)::bigint
 		FROM order_summary_hourly
-		WHERE tenant_id = $1 AND bucket >= $2 AND bucket < $3`,
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2 AND bucket < $3`,
 		tenantID, win.Start, win.End).
 		Scan(&out.GrossRevenue, &out.TotalDiscount, &out.TotalTax, &out.TotalShipping, &out.ActiveOrders, &out.TotalQuantity)
 	if err != nil {

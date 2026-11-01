@@ -46,7 +46,7 @@ func (h *Handler) OrderSummary(w http.ResponseWriter, r *http.Request) {
 			COALESCE(SUM(cancelled_orders), 0),
 			COALESCE(SUM(total_revenue), 0)
 		FROM order_summary_hourly
-		WHERE tenant_id = $1 AND bucket >= $2 AND bucket <= $3
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2 AND bucket <= $3
 	`, tenantID, fromTime.Truncate(time.Hour), toTime).Scan(&totalOrders, &activeOrders, &cancelledOrders, &totalRevenue)
 	if err != nil && err != sql.ErrNoRows {
 		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
@@ -58,7 +58,7 @@ func (h *Handler) OrderSummary(w http.ResponseWriter, r *http.Request) {
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(MAX(last_processed_at), NOW())
 		FROM processing_watermarks
-		WHERE tenant_id = $1
+		WHERE tenant_id IN (SELECT analytics_scope_tenants($1))
 	`, tenantID).Scan(&lastProcessedAt)
 	if err != nil || lastProcessedAt.IsZero() {
 		lastProcessedAt = time.Now().UTC()
@@ -76,4 +76,3 @@ func (h *Handler) OrderSummary(w http.ResponseWriter, r *http.Request) {
 		LastProcessedAt: lastProcessedAt,
 	})
 }
-

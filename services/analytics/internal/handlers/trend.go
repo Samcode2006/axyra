@@ -41,10 +41,11 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 
 	if interval == "hour" {
 		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT bucket, total_orders, total_revenue, total_discount, new_customer_orders
+			SELECT bucket, SUM(total_orders)::bigint, SUM(total_revenue), SUM(total_discount), SUM(new_customer_orders)::bigint
 			FROM order_summary_hourly
-			WHERE tenant_id = $1 AND bucket >= $2 AND bucket <= $3
-			ORDER BY bucket ASC
+			WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2 AND bucket <= $3
+			GROUP BY bucket
+            ORDER BY bucket ASC
 		`, tenantID, fromTime.Truncate(time.Hour), toTime)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))
@@ -62,10 +63,11 @@ func (h *Handler) OrderTrend(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		rows, err := h.db.QueryContext(r.Context(), `
-			SELECT bucket, total_orders, total_revenue, total_discount, new_customer_orders
+			SELECT bucket, SUM(total_orders)::bigint, SUM(total_revenue), SUM(total_discount), SUM(new_customer_orders)::bigint
 			FROM order_summary_daily
-			WHERE tenant_id = $1 AND bucket >= $2::date AND bucket <= $3::date
-			ORDER BY bucket ASC
+			WHERE tenant_id IN (SELECT analytics_scope_tenants($1)) AND bucket >= $2::date AND bucket <= $3::date
+			GROUP BY bucket
+            ORDER BY bucket ASC
 		`, tenantID, fromTime.Format("2006-01-02"), toTime.Format("2006-01-02"))
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query error: %v", err))

@@ -200,12 +200,17 @@ export const tenants = {
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
+export const ORGANIZATION_SCOPE = '__organization__';
+function dashboardParams<T extends { tenant_id?: string }>(params?: T) {
+ return params?.tenant_id === ORGANIZATION_SCOPE ? { ...params, tenant_id: undefined, scope: 'organization' } : params;
+}
+
 export const analytics = {
   summary: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<OrderSummary>('/v1/analytics/orders/summary', { params }),
+    http.get<OrderSummary>('/v1/analytics/orders/summary', { params: dashboardParams(params) }),
 
   trend: (params: { interval: 'hour' | 'day'; from: string; to: string; tenant_id?: string }) =>
-    http.get<TrendResponse>('/v1/analytics/orders/trend', { params }),
+    http.get<TrendResponse>('/v1/analytics/orders/trend', { params: dashboardParams(params) }),
 
   topProducts: (params: {
     limit?: number;
@@ -213,38 +218,38 @@ export const analytics = {
     to: string;
     sort_by?: 'revenue' | 'quantity' | 'returns';
     tenant_id?: string;
-  }) => http.get<TopProductsResponse>('/v1/analytics/products/top', { params }),
+  }) => http.get<TopProductsResponse>('/v1/analytics/products/top', { params: dashboardParams(params) }),
 
   breakdown: (params: { group_by: BreakdownGroup; from: string; to: string; tenant_id?: string }) =>
-    http.get<BreakdownResponse>('/v1/analytics/orders/breakdown', { params }),
+    http.get<BreakdownResponse>('/v1/analytics/orders/breakdown', { params: dashboardParams(params) }),
 
   // Schema expansion endpoints. Every one is tenant-scoped by the control plane
   // for customer admins; operators may pass tenant_id.
   revenue: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<RevenueBreakdown>('/v1/analytics/orders/revenue', { params }),
+    http.get<RevenueBreakdown>('/v1/analytics/orders/revenue', { params: dashboardParams(params) }),
   customerSummary: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<CustomerSummary>('/v1/analytics/customers/summary', { params }),
+    http.get<CustomerSummary>('/v1/analytics/customers/summary', { params: dashboardParams(params) }),
   topBuyers: (params: { limit?: number; from?: string; to?: string; tenant_id?: string }) =>
-    http.get<{ tenant_id: string; data: TopBuyer[] }>('/v1/analytics/customers/top', { params }),
+    http.get<{ tenant_id: string; data: TopBuyer[] }>('/v1/analytics/customers/top', { params: dashboardParams(params) }),
   cohorts: (params: { from: string; to: string; interval: 'day' | 'week'; tenant_id?: string }) =>
-    http.get<{ tenant_id: string; interval: string; data: CohortPoint[] }>('/v1/analytics/customers/cohorts', { params }),
+    http.get<{ tenant_id: string; interval: string; data: CohortPoint[] }>('/v1/analytics/customers/cohorts', { params: dashboardParams(params) }),
   geo: (params: { from: string; to: string; group_by: GeoGroup; limit?: number; tenant_id?: string }) =>
-    http.get<{ tenant_id: string; group_by: string; data: GeoItem[] }>('/v1/analytics/geo/breakdown', { params }),
+    http.get<{ tenant_id: string; group_by: string; data: GeoItem[] }>('/v1/analytics/geo/breakdown', { params: dashboardParams(params) }),
   channels: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<{ tenant_id: string; data: ChannelItem[] }>('/v1/analytics/channels/breakdown', { params }),
+    http.get<{ tenant_id: string; data: ChannelItem[] }>('/v1/analytics/channels/breakdown', { params: dashboardParams(params) }),
   payments: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<{ tenant_id: string; data: PaymentItem[] }>('/v1/analytics/payments/breakdown', { params }),
+    http.get<{ tenant_id: string; data: PaymentItem[] }>('/v1/analytics/payments/breakdown', { params: dashboardParams(params) }),
   returns: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<ReturnsSummary>('/v1/analytics/returns/summary', { params }),
+    http.get<ReturnsSummary>('/v1/analytics/returns/summary', { params: dashboardParams(params) }),
   funnel: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<{ tenant_id: string; data: FunnelStage[] }>('/v1/analytics/fulfillment/funnel', { params }),
+    http.get<{ tenant_id: string; data: FunnelStage[] }>('/v1/analytics/fulfillment/funnel', { params: dashboardParams(params) }),
   discounts: (params: { from: string; to: string; tenant_id?: string }) =>
-    http.get<DiscountSummary>('/v1/analytics/discounts/summary', { params }),
+    http.get<DiscountSummary>('/v1/analytics/discounts/summary', { params: dashboardParams(params) }),
   tenantHealth: (params: { tenant_id: string }) =>
     http.get<TenantHealth>('/v1/analytics/tenant/health', { params }),
 
   status: (params?: { tenant_id?: string }) =>
-    http.get<AnalyticsStatus>('/v1/analytics/status', { params }),
+    http.get<AnalyticsStatus>('/v1/analytics/status', { params: dashboardParams(params) }),
 
   deadLetter: (params?: { agent_id?: string; limit?: number }) =>
     http.get<DeadLetterEvent[]>('/v1/analytics/dead-letter', { params }),
