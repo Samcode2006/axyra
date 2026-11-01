@@ -123,6 +123,7 @@ type Tenant struct {
 }
 
 type CreateTenantRequest struct {
+	DatabaseMode     string             `json:"database_mode,omitempty"`
 	OrganizationID   string             `json:"organization_id"`
 	ExternalTenantID string             `json:"external_tenant_id"`
 	Name             string             `json:"name"`

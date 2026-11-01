@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { usePanel } from '../analytics/panels/usePanel';
 import { auth, errMsg, organizations as orgsApi, tenants as tenantsApi } from '../../lib/api';
 import { useLoadEffect } from '../../lib/useLoadEffect';
 import { Badge } from '../../components/Badge';
@@ -13,7 +14,7 @@ const PLANS = ['free', 'growth', 'enterprise'] as const;
 const CYCLES = ['monthly', 'annual'] as const;
 
 const EMPTY_FORM = {
-  name: '', external_tenant_id: '', organization_id: '', events: '', queries: '',
+  database_mode: 'existing', name: '', external_tenant_id: '', organization_id: '', events: '', queries: '',
   region: 'global', plan_tier: 'growth', billing_cycle: 'monthly', tags: '',
 };
 
@@ -71,6 +72,7 @@ export default function TenantsPage() {
       const events = num(form.events);
       const queries = num(form.queries);
       await tenantsApi.create({
+        database_mode: form.database_mode as 'existing' | 'managed',
         name: form.name,
         external_tenant_id: form.external_tenant_id,
         organization_id: operator ? form.organization_id : undefined,
@@ -142,6 +144,13 @@ export default function TenantsPage() {
       {showForm && (
         <form className="panel form" onSubmit={handleCreate}>
           <h2 className="panel-title">New Tenant</h2>
+          <label>Database
+            <select value={form.database_mode} onChange={(e) => setForm({ ...form, database_mode: e.target.value })}>
+              <option value="existing">Connect an existing database</option>
+              <option value="managed">Create a managed PostgreSQL database</option>
+            </select>
+          </label>
+          <p className="hint">{form.database_mode === 'managed' ? 'Creates a private database and dedicated agent. Provisioning continues in the background. Database volumes are retained; backups and removal require an operator.' : 'Registers the tenant. Configure an agent separately to connect your existing database.'}</p>
           <div className="form-row">
             <label>Name
               <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Store Alpha" />
@@ -216,7 +225,7 @@ export default function TenantsPage() {
                   <td>{t.name}<div className="mono">{t.id}</div></td>
                   <td className="mono">{t.external_tenant_id}</td>
                   {operator && <td>{orgName(t.organization_id)}</td>}
-                  <td><Badge status={t.status} /></td>
+                  <td><Badge status={t.status} /><Provisioning tenant={t} onReady={load} /></td>
                   <td>
                     {profileEdit === t.id ? (
                       <div className="inline-form">
@@ -243,8 +252,8 @@ export default function TenantsPage() {
                       </div>
                     ) : (
                       <>
-                        {t.plan_tier} · {t.billing_cycle}
-                        <div className="hint">{t.region}{t.tags.length > 0 && ` · ${t.tags.join(', ')}`}</div>
+                        {t.plan_tier}  - {t.billing_cycle}
+                        <div className="hint">{t.region}{t.tags.length > 0 && `  - ${t.tags.join(', ')}`}</div>
                         <button className="btn btn--sm" onClick={() => startProfile(t)}>Edit</button>
                       </>
                     )}
@@ -263,7 +272,7 @@ export default function TenantsPage() {
                       </div>
                     ) : (
                       <>
-                        {t.quota ? `${formatNumber(t.quota.max_events_per_day)} events/day · ${t.quota.max_concurrent_queries} queries` : '—'}{' '}
+                        {t.quota ? `${formatNumber(t.quota.max_events_per_day)} events/day  - ${t.quota.max_concurrent_queries} queries` : '—'}{' '}
                         <button className="btn btn--sm" onClick={() => startEdit(t)}>Edit</button>
                       </>
                     )}
@@ -271,10 +280,12 @@ export default function TenantsPage() {
                   <td>
                     <div className="row-actions">
                       <select
+                        disabled={t.status === 'provisioning'}
                         value={t.status}
                         onChange={(e) => void run(() => tenantsApi.update(t.id, { status: e.target.value as Tenant['status'] }))}
                         className="select-sm"
                       >
+                        {t.status === 'provisioning' && <option value="provisioning">Provisioning</option>}
                         <option value="active">Active</option>
                         <option value="suspended">Suspend</option>
                         <option value="inactive">Deactivate</option>
@@ -289,7 +300,7 @@ export default function TenantsPage() {
           {pages > 1 && (
             <div className="row-actions" style={{ marginTop: 16 }}>
               <button className="btn btn--sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
-              <span className="hint">Page {page} of {pages} · {total} tenants</span>
+              <span className="hint">Page {page} of {pages}  - {total} tenants</span>
               <button className="btn btn--sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</button>
             </div>
           )}
@@ -297,4 +308,25 @@ export default function TenantsPage() {
       )}
     </div>
   );
+}
+
+const stages: Record<string,string> = { queued:'Queued', creating_database:'Creating database', preparing_schema:'Preparing schema', registering_agent:'Connecting agent', waiting_for_stream:'Verifying live stream', ready:'Ready' };
+function Provisioning({tenant,onReady}:{tenant:Tenant;onReady:()=>Promise<void>}) {
+ const live=usePanel(()=>tenantsApi.provisioning(tenant.id).then(r=>r.data),`provision|${tenant.id}`,3000);
+ const [retryError,setRetryError]=useState<string|null>(null);
+ const [retrying,setRetrying]=useState(false);
+ const p=live.data;
+ useEffect(()=>{if(p?.status==='ready' && tenant.status==='provisioning') void onReady();},[p?.status,tenant.status,onReady]);
+ if(live.error) return <span className="hint">Provisioning status unavailable</span>;
+ if(!p || p.status==='external') return null;
+ return <div className="hint">
+  <div>Managed database ? {p.status==='failed' ? 'Failed' : stages[p.stage ?? 'queued'] ?? p.stage}</div>
+  {p.status==='ready' && <div title="Private Docker network address">{p.host}:{p.port}/{p.database}</div>}
+  {p.error && <div role="alert">{p.error}</div>}
+  {retryError && <div role="alert">{retryError}</div>}
+  {p.status==='failed' && <button className="btn btn--sm" disabled={retrying} onClick={async()=>{
+   setRetrying(true);setRetryError(null);
+   try{await tenantsApi.retryProvisioning(tenant.id);live.reload();}catch(e){setRetryError(errMsg(e));}finally{setRetrying(false);}
+  }}>{retrying?'Retrying?':'Retry provisioning'}</button>}
+ </div>;
 }

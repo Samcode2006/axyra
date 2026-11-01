@@ -14,6 +14,7 @@ const minJWTSecretLen = 32
 
 // Config holds all control-plane configuration sourced from environment variables.
 type Config struct {
+	ManagedProvisioning bool
 	// Database
 	DatabaseURL string
 
@@ -45,17 +46,18 @@ type Config struct {
 // Load reads configuration from environment variables and validates required values.
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:       getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5434/axyra_platform?sslmode=disable"),
-		Port:              getEnv("PORT", "8081"),
-		JWTSecret:         getEnv("JWT_SECRET", knownDevJWTSecret),
-		AnalyticsURL:      getEnv("ANALYTICS_URL", "http://localhost:8082"),
-		ServiceToken:      os.Getenv("AXYRA_SERVICE_TOKEN"),
-		DefaultAgentToken: getEnv("AXYRA_AGENT_TOKEN", "axyra_agent_secret_token_123"),
-		TenantCount:       getPositiveIntEnv("TENANT_COUNT", 5),
-		AdminUsername:     getEnv("AXYRA_ADMIN_USERNAME", "admin"),
-		AdminPassword:     getEnv("AXYRA_ADMIN_PASSWORD", ""),
-		OperatorUsername:  getEnv("AXYRA_OPERATOR_USERNAME", "operator"),
-		OperatorPassword:  getEnv("AXYRA_OPERATOR_PASSWORD", ""),
+		ManagedProvisioning: os.Getenv("MANAGED_PROVISIONING_ENABLED") == "true",
+		DatabaseURL:         getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5434/axyra_platform?sslmode=disable"),
+		Port:                getEnv("PORT", "8081"),
+		JWTSecret:           getEnv("JWT_SECRET", knownDevJWTSecret),
+		AnalyticsURL:        getEnv("ANALYTICS_URL", "http://localhost:8082"),
+		ServiceToken:        os.Getenv("AXYRA_SERVICE_TOKEN"),
+		DefaultAgentToken:   getEnv("AXYRA_AGENT_TOKEN", "axyra_agent_secret_token_123"),
+		TenantCount:         getPositiveIntEnv("TENANT_COUNT", 5),
+		AdminUsername:       getEnv("AXYRA_ADMIN_USERNAME", "admin"),
+		AdminPassword:       getEnv("AXYRA_ADMIN_PASSWORD", ""),
+		OperatorUsername:    getEnv("AXYRA_OPERATOR_USERNAME", "operator"),
+		OperatorPassword:    getEnv("AXYRA_OPERATOR_PASSWORD", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

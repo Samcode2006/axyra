@@ -103,6 +103,9 @@ func (m *Mapper) Map(ce connector.ChangeEvent) (*AxyraEvent, error) {
 
 	// Generate deterministic event ID derived from LSN + Table + PK
 	hashSeed := fmt.Sprintf("%s:%s:%s", ce.LSN, ce.Table, pkVal)
+	if m.cfg.EventIDNamespace != "" {
+		hashSeed = m.cfg.EventIDNamespace + ":" + hashSeed
+	}
 	eventID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(hashSeed)).String()
 
 	// Determine event type

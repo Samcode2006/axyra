@@ -36,9 +36,10 @@ type SourceConfig struct {
 }
 
 type Config struct {
-	AxyraEndpoint string `yaml:"axyra_endpoint"`
-	AgentToken    string `yaml:"agent_token"`
-	AgentID       string `yaml:"agent_id"`
+	EventIDNamespace string `yaml:"event_id_namespace"`
+	AxyraEndpoint    string `yaml:"axyra_endpoint"`
+	AgentToken       string `yaml:"agent_token"`
+	AgentID          string `yaml:"agent_id"`
 	// Legacy single-DB fields. Used when Sources is empty.
 	PostgresDSN     string        `yaml:"postgres_dsn"`
 	ReplicationSlot string        `yaml:"replication_slot"`
@@ -101,12 +102,17 @@ func (cfg *Config) EffectiveSources() []SourceConfig {
 	if pub == "" {
 		pub = "axyra_pub"
 	}
+	sourceName := "default"
+	if v := os.Getenv("SOURCE_TENANT_ID"); v != "" {
+		sourceName = v
+	}
 	return []SourceConfig{
 		{
-			Name:            "default",
-			PostgresDSN:     cfg.PostgresDSN,
-			ReplicationSlot: slot,
-			PublicationName: pub,
+			Name:             sourceName,
+			ExternalTenantID: os.Getenv("SOURCE_TENANT_ID"),
+			PostgresDSN:      cfg.PostgresDSN,
+			ReplicationSlot:  slot,
+			PublicationName:  pub,
 			// ExternalTenantID left empty — mapper reads from row
 		},
 	}
@@ -114,15 +120,16 @@ func (cfg *Config) EffectiveSources() []SourceConfig {
 
 func Load(path string) (*Config, error) {
 	cfg := &Config{
-		AxyraEndpoint:   "http://localhost:8082",
-		AgentToken:      "axyra_agent_secret_token_123",
-		AgentID:         "agent_ref_demo",
-		PostgresDSN:     "postgres://postgres:postgres@localhost:5433/reference_db?sslmode=disable",
-		ReplicationSlot: "axyra_slot",
-		PublicationName: "axyra_pub",
-		BatchSize:       10,
-		FlushInterval:   200 * time.Millisecond,
-		HealthPort:      "8083",
+		EventIDNamespace: os.Getenv("EVENT_ID_NAMESPACE"),
+		AxyraEndpoint:    "http://localhost:8082",
+		AgentToken:       "axyra_agent_secret_token_123",
+		AgentID:          "agent_ref_demo",
+		PostgresDSN:      "postgres://postgres:postgres@localhost:5433/reference_db?sslmode=disable",
+		ReplicationSlot:  "axyra_slot",
+		PublicationName:  "axyra_pub",
+		BatchSize:        10,
+		FlushInterval:    200 * time.Millisecond,
+		HealthPort:       "8083",
 		Tables: []TableConfig{
 			{
 				Name:            "orders",

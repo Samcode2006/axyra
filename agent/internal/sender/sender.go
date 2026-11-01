@@ -44,6 +44,7 @@ func (s *Sender) In() chan<- mapper.AxyraEvent {
 }
 
 func (s *Sender) Start(ctx context.Context) {
+	go s.heartbeat(ctx)
 	go func() {
 		defer close(s.done)
 		ticker := time.NewTicker(s.cfg.FlushInterval)
@@ -75,6 +76,28 @@ func (s *Sender) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func (s *Sender) heartbeat(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.AxyraEndpoint+"/v1/agent/heartbeat", nil)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+s.cfg.AgentToken)
+			resp, err := s.client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stop:
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *Sender) flush() {
@@ -158,4 +181,3 @@ func (s *Sender) Close() error {
 	<-s.done
 	return nil
 }
-

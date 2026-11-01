@@ -1,5 +1,12 @@
 # Axyra REST API Reference
 
+Managed local PostgreSQL creation is available through `POST /v1/tenants` with
+`database_mode: "managed"`. It returns 202 and a provisioning tenant; existing
+database registration still returns 201. Organization-scoped progress and retry
+routes are `/v1/tenants/{id}/provisioning` and
+`/v1/tenants/{id}/provisioning/retry`. See [managed provisioning](managed-provisioning.md)
+for enabling the worker, connection access, resource limits and lifecycle rules.
+
 ## Freshness and live metrics
 
 Status exposes `activity_state`: `waiting` (no completed events), `active`,

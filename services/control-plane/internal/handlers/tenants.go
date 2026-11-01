@@ -215,6 +215,15 @@ func (h *Handler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if req.DatabaseMode != "" && req.DatabaseMode != "existing" && req.DatabaseMode != "managed" {
+		respondError(w, http.StatusBadRequest, "database_mode must be existing or managed")
+		return
+	}
+	managed := req.DatabaseMode == "managed"
+	if managed && !h.cfg.ManagedProvisioning {
+		respondError(w, http.StatusServiceUnavailable, "Managed provisioning is not enabled on this deployment")
+		return
+	}
 	name, ok1 := cleanName(req.Name, maxNameLen)
 	ext, ok2 := cleanExternalID(req.ExternalTenantID)
 	if !ok1 || !ok2 {
@@ -268,20 +277,43 @@ func (h *Handler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 
 	var t models.Tenant
 	err := h.withTx(r.Context(), func(tx *sql.Tx) error {
+		status := "active"
+		if managed {
+			if _, err := tx.ExecContext(r.Context(), `SELECT pg_advisory_xact_lock(7243021)`); err != nil {
+				return err
+			}
+			var own, total int
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FILTER(WHERE t.organization_id=$1),COUNT(*) FROM tenant_provisioning j JOIN tenants t ON t.id=j.tenant_id`, orgID).Scan(&own, &total); err != nil {
+				return err
+			}
+			if own >= 5 || total >= 20 {
+				return errProvisionLimit
+			}
+			status = "provisioning"
+		}
 		var err error
 		t, err = scanTenant(tx.QueryRowContext(r.Context(), `
 			INSERT INTO tenants (id, organization_id, external_tenant_id, name, status, max_events_per_day, max_concurrent_queries,
 				region, plan_tier, billing_cycle, tags, metadata)
-			VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $10, $11::jsonb)
+			VALUES ($1, $2, $3, $4, $12, $5, $6, $7, $8, $9, $10, $11::jsonb)
 			RETURNING `+tenantCols, newID("tenant_"), orgID, ext, name, events, queries,
-			region, plan, billing, pq.Array(tags), string(metadata)))
+			region, plan, billing, pq.Array(tags), string(metadata), status))
 		if err != nil {
 			return err
+		}
+		if managed {
+			if _, err := tx.ExecContext(r.Context(), `INSERT INTO tenant_provisioning(tenant_id) VALUES($1)`, t.ID); err != nil {
+				return err
+			}
 		}
 		return audit(r.Context(), tx, p, auditEntry{OrgID: orgID, Action: "tenant.create", ResourceType: "tenant", ResourceID: t.ID,
 			Details: map[string]any{"name": name, "external_tenant_id": ext, "quota": t.Quota,
 				"region": t.Region, "plan_tier": t.PlanTier, "billing_cycle": t.BillingCycle}})
 	})
+	if errors.Is(err, errProvisionLimit) {
+		respondError(w, http.StatusConflict, "Managed database limit reached (5 per organization, 20 per deployment)")
+		return
+	}
 	if err != nil {
 		if isForeignKeyViolation(err) {
 			notFound(w, "Organization")
@@ -290,7 +322,11 @@ func (h *Handler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 		writeDBError(w, r, err, "A tenant with this external_tenant_id already exists in the organization")
 		return
 	}
-	respondJSON(w, http.StatusCreated, t)
+	if managed {
+		respondJSON(w, http.StatusAccepted, t)
+	} else {
+		respondJSON(w, http.StatusCreated, t)
+	}
 }
 
 func (h *Handler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
@@ -356,6 +392,16 @@ func (h *Handler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
 			return sql.ErrNoRows
 		}
 
+		if req.Status != nil {
+			var busy bool
+			if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM tenant_provisioning WHERE tenant_id=$1 AND status<>'ready')`, id).Scan(&busy); err != nil {
+				return err
+			}
+			if busy {
+				return errManagedLifecycle
+			}
+		}
+
 		// All requested changes are applied in one statement, so a partial
 		// update can never be observed or half-committed.
 		t, err = scanTenant(tx.QueryRowContext(r.Context(), `
@@ -414,6 +460,10 @@ func (h *Handler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
 		notFound(w, "Tenant")
 		return
 	}
+	if errors.Is(err, errManagedLifecycle) {
+		respondError(w, http.StatusConflict, "Wait for managed provisioning to finish or retry the failed job")
+		return
+	}
 	if err != nil {
 		writeDBError(w, r, err, "Tenant already exists")
 		return
@@ -438,6 +488,13 @@ func (h *Handler) DeleteTenant(w http.ResponseWriter, r *http.Request) {
 		if !p.CanAccessOrg(t.OrganizationID) {
 			return sql.ErrNoRows
 		}
+		var managed bool
+		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM tenant_provisioning WHERE tenant_id=$1)`, id).Scan(&managed); err != nil {
+			return err
+		}
+		if managed {
+			return errManagedLifecycle
+		}
 		if _, err := tx.ExecContext(r.Context(), `DELETE FROM tenants WHERE id = $1`, id); err != nil {
 			return err
 		}
@@ -446,6 +503,10 @@ func (h *Handler) DeleteTenant(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		notFound(w, "Tenant")
+		return
+	}
+	if errors.Is(err, errManagedLifecycle) {
+		respondError(w, http.StatusConflict, "Managed databases require operator backup and decommissioning; ordinary tenant deletion is disabled")
 		return
 	}
 	if err != nil {

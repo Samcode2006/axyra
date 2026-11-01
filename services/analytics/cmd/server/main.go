@@ -87,6 +87,7 @@ func newRouter(h *handlers.Handler, cfg *config.Config) http.Handler {
 	// Agent ingestion endpoints
 	r.Post("/v1/agent/events", h.IngestEvents)
 	r.Get("/v1/agent/ack", h.AgentAck)
+	r.Post("/v1/agent/heartbeat", h.AgentHeartbeat)
 
 	// Tenant-scoped analytics endpoints
 	r.Group(func(r chi.Router) {

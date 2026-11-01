@@ -58,6 +58,8 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/v1/tenants", h.ListTenants)
 		r.Post("/v1/tenants", h.CreateTenant)
 		r.Get("/v1/tenants/{id}", h.GetTenant)
+		r.Get("/v1/tenants/{id}/provisioning", h.ProvisioningStatus)
+		r.Post("/v1/tenants/{id}/provisioning/retry", h.RetryProvisioning)
 		r.Patch("/v1/tenants/{id}", h.UpdateTenant)
 		r.Delete("/v1/tenants/{id}", h.DeleteTenant)
 

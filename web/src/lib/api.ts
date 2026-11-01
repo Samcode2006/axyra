@@ -163,10 +163,17 @@ export const agents = {
 
 // ─── Tenants ─────────────────────────────────────────────────────────────────
 
+export interface ProvisioningStatus {
+ status: 'external' | 'queued' | 'provisioning' | 'ready' | 'failed';
+ stage?: string; error?: string; host?: string; database?: string; port?: number; agent_id?: string;
+}
 export const tenants = {
+ provisioning: (id: string) => http.get<ProvisioningStatus>(`/v1/tenants/${id}/provisioning`),
+ retryProvisioning: (id: string) => http.post(`/v1/tenants/${id}/provisioning/retry`),
   list: (params?: { page?: number; per_page?: number; status?: string }) =>
     http.get<PaginatedResponse<Tenant>>('/v1/tenants', { params }),
   create: (payload: {
+    database_mode?: 'existing' | 'managed';
     external_tenant_id: string;
     name: string;
     organization_id?: string;

@@ -382,8 +382,10 @@ func (c *PostgresConnector) ensurePublication(ctx context.Context, conn *pgconn.
 	for _, table := range tables {
 		name := pgx.Identifier(strings.Split(table, ".")).Sanitize()
 		result := conn.ExecParams(ctx, `SELECT to_regclass($1)::text,
-			EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname=$2
-			AND to_regclass(format('%I.%I', schemaname, tablename))=to_regclass($1))`,
+			EXISTS (SELECT 1 FROM pg_publication_tables pt
+			JOIN pg_namespace ns ON ns.nspname=pt.schemaname
+			JOIN pg_class rel ON rel.relnamespace=ns.oid AND rel.relname=pt.tablename
+			WHERE pt.pubname=$2 AND rel.oid=to_regclass($1))`,
 			[][]byte{[]byte(name), []byte(c.publicationName)}, nil, nil, nil).Read()
 		if result.Err != nil {
 			return fmt.Errorf("inspect publication table %s: %w", table, result.Err)

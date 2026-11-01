@@ -175,6 +175,7 @@ services:
   # ─── Axyra Agent (multi-source: one goroutine per tenant DB) ─────────────────
 
   axyra-agent:
+    image: axyra-managed-agent:local
     build:
       context: ../agent
       dockerfile: Dockerfile
@@ -237,6 +238,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
+      MANAGED_PROVISIONING_ENABLED: ${MANAGED_PROVISIONING_ENABLED:-false}
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform?sslmode=disable
       REDIS_URL: redis://redis:6379
       ANALYTICS_URL: http://analytics:8082
@@ -260,6 +262,26 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+
+  provisioner:
+    build:
+      context: ../services/control-plane
+      dockerfile: Dockerfile.provisioner
+    profiles: ["managed"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform?sslmode=disable
+      PROVISIONING_KEY: ${PROVISIONING_KEY:-}
+      MANAGED_NETWORK: ${COMPOSE_PROJECT_NAME:-deploy}_default
+      MANAGED_AGENT_IMAGE: axyra-managed-agent:local
+      ANALYTICS_URL: http://analytics:8082
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
 
   analytics:
     build:

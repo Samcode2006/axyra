@@ -1,0 +1,9 @@
+FROM golang:bookworm AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /provisioner ./cmd/provisioner
+FROM docker:cli
+COPY --from=builder /provisioner /usr/local/bin/axyra-provisioner
+ENTRYPOINT ["/usr/local/bin/axyra-provisioner"]

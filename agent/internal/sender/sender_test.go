@@ -19,6 +19,13 @@ func TestSenderBatchDelivery(t *testing.T) {
 	receivedEvents := make([]mapper.AxyraEvent, 0)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/agent/heartbeat" {
+			if r.Header.Get("Authorization") != "Bearer test-token" {
+				t.Error("heartbeat missing authentication")
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.URL.Path != "/v1/agent/events" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -77,4 +84,3 @@ func TestSenderBatchDelivery(t *testing.T) {
 
 	_ = snd.Close()
 }
-

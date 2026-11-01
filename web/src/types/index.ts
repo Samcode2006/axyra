@@ -16,7 +16,7 @@ export interface Application {
 
 // ─── Tenants ─────────────────────────────────────────────────────────────────
 
-export type TenantStatus = 'active' | 'suspended' | 'inactive';
+export type TenantStatus = 'active' | 'suspended' | 'inactive' | 'provisioning';
 
 export interface Tenant {
   id: string;
