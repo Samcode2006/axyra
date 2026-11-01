@@ -75,6 +75,9 @@ func (h *Handler) Routes() http.Handler {
 		r.Delete("/v1/metric-definitions/{metric_id}", h.DeleteMetricDefinition)
 
 		r.Get("/v1/audit-logs", h.ListAuditLogs)
+		r.Get("/v1/comparison/sources", h.ComparisonSources)
+		r.Get("/v1/comparison/snapshot", h.ComparisonSnapshot)
+		r.Post("/v1/comparison/simulation", h.ComparisonSimulation)
 
 		// Dashboard analytics (including dead-letter inspection) are proxied
 		// so the web app needs only one origin.

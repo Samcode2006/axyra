@@ -7,6 +7,7 @@ import OverviewPage from '../features/overview/OverviewPage';
 import TenantsPage from '../features/tenants/TenantsPage';
 import ApplicationsPage from '../features/applications/ApplicationsPage';
 import AnalyticsPage from '../features/analytics/AnalyticsPage';
+import ComparisonPage from '../features/comparison/ComparisonPage';
 import AccessPoliciesPage from '../features/access-policies/AccessPoliciesPage';
 import MetricConfigPage from '../features/metric-config/MetricConfigPage';
 import MonitoringPage from '../features/monitoring/MonitoringPage';
@@ -28,6 +29,7 @@ export function AppRouter() {
           <Route path="tenants" element={<TenantsPage />} />
           <Route path="applications" element={<ApplicationsPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="comparison" element={<ComparisonPage />} />
           <Route path="access-policies" element={<AccessPoliciesPage />} />
           <Route path="monitoring" element={<MonitoringPage />} />
           <Route path="metric-config" element={<MetricConfigPage />} />

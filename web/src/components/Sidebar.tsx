@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   BarChart2,
+  GitCompareArrows,
   Building2,
   ChevronRight,
   Cpu,
@@ -28,6 +29,7 @@ const NAV: NavEntry[] = [
   { to: '/tenants', icon: Building2, label: 'Tenants' },
   { to: '/applications', icon: Cpu, label: 'Applications' },
   { to: '/analytics', icon: BarChart2, label: 'Analytics' },
+  { to: '/comparison', icon: GitCompareArrows, label: 'Live Comparison' },
   { to: '/access-policies', icon: ShieldCheck, label: 'Access & Policies' },
   // Dev A owns these pages but they appear in the shared nav
   { to: '/monitoring', icon: Globe, label: 'Monitoring' },

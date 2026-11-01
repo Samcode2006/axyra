@@ -1,5 +1,8 @@
 # Axyra Bulk Seed
 
+For live source SQL versus Axyra results, including a three-order creation,
+update and cancellation simulation, see [the comparison runner](cmd/compare/README.md).
+
 ## Recover existing orders missing from analytics
 
 After the source is registered and its agent is streaming, run from

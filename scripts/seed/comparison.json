@@ -1,0 +1,14 @@
+[
+  {
+    "stage": "empty baseline",
+    "mode": "all-time",
+    "pass": false,
+    "attempts": 1,
+    "elapsed_ms": 8,
+    "source_ms": 4,
+    "api_ms": 4,
+    "source": [],
+    "analytics": null,
+    "error": "analytics HTTP 401"
+  }
+]

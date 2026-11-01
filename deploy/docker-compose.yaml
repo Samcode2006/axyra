@@ -242,6 +242,8 @@ services:
       DATABASE_URL: postgres://postgres:postgres@platform-db:5432/axyra_platform?sslmode=disable
       REDIS_URL: redis://redis:6379
       ANALYTICS_URL: http://analytics:8082
+      AXYRA_COMPARISON_SOURCES: ${AXYRA_COMPARISON_SOURCES:-}
+      AXYRA_COMPARISON_REFERENCE_DSN: postgres://postgres:postgres@reference-db-{index}:5432/reference_db?sslmode=disable
       AXYRA_SERVICE_TOKEN: ${AXYRA_SERVICE_TOKEN:?Set AXYRA_SERVICE_TOKEN in deploy/.env}
       AXYRA_AGENT_TOKEN: ${AXYRA_AGENT_TOKEN}
       JWT_SECRET: ${JWT_SECRET}
